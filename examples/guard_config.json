@@ -1,0 +1,59 @@
+{
+  "agent_id": "research-agent-01",
+  "user_id": "alice",
+  "budget_limit": 20.0,
+  "approval_threshold_cost": 2.0,
+  "allowed_action_types": ["api_call", "send_message", "payment"],
+  "scope_rules": [
+    {
+      "action_type": "api_call",
+      "allowed_targets": [
+        "https://api.research.example/v1/search",
+        "https://api.research.example/v1/summarize"
+      ],
+      "match": "exact",
+      "methods": ["POST"],
+      "param_schema": {
+        "required": ["query"],
+        "properties": {
+          "query": {"type": "string", "maximum": 200}
+        },
+        "additional_properties": false
+      },
+      "forbidden_targets": ["admin", "billing", "internal", "config", "production"],
+      "forbid_match": "token",
+      "max_cost": 1.00
+    },
+    {
+      "action_type": "payment",
+      "allowed_targets": ["0xMerchant1111111111111111111111111111111111"],
+      "match": "exact",
+      "methods": ["x402"],
+      "param_schema": {
+        "required": ["resource"],
+        "properties": {
+          "resource": {"type": "string", "enum": ["weather"]},
+          "memo": {"type": "string", "maximum": 280}
+        },
+        "additional_properties": false
+      },
+      "forbidden_targets": ["evil", "scam", "rug"],
+      "forbid_match": "token",
+      "max_cost": 1.00
+    },
+    {
+      "action_type": "send_message",
+      "allowed_targets": ["alice", "team-channel"],
+      "match": "exact",
+      "methods": ["send_message"],
+      "param_schema": {
+        "required": ["channel", "body"],
+        "properties": {
+          "channel": {"type": "string", "enum": ["alice", "team-channel"]},
+          "body": {"type": "string", "maximum": 1000}
+        },
+        "additional_properties": false
+      }
+    }
+  ]
+}

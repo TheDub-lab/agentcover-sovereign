@@ -1,0 +1,504 @@
+Metadata-Version: 2.4
+Name: safety-protocol
+Version: 0.1.0
+Summary: Safety protocol framework for LLM agents — binding, scope, enforcement, monitoring, approval, audit, killswitch
+Author-email: Michael <michael@example.com>
+License: MIT
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Topic :: Security
+Classifier: Topic :: Artificial Intelligence
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+
+# Safety Protocol Framework
+
+**Agent safety is infrastructure, not prompts.**
+
+AI agents can spend money, call APIs, modify systems, send messages, and spawn subagents. The model's good behavior isn't reliable enough to build on. Safety has to be enforced in infrastructure — scope, budget, approval gates, monitoring, audit trail, kill switch — not hoped for in a system prompt.
+
+This framework provides the enforcement layer. The agent operates freely **within** the bounds. The bounds are enforced by code, not by the model.
+
+When the agent messes up, the audit trail tells you what happened, the binding tells you who's accountable, and the next iteration has tighter scope. That's the model.
+
+**The one thing that makes the rest real:** scope has to be *least-privilege and fail-closed*, or the other controls are decorative. A broad allowlist (a `prefix` on `/v1/`) lets the agent hit `/v1/admin` and `/v1/delete-everything` — so budget, approval, and kill-switch all sit inside a loose perimeter and mean nothing. This project enforces scope on **five** bindings (action type, target, method, params, per-action cap), ships a **linter that fails closed** (a broad or self-contradictory rule means the guard refuses to start), and runs as a **guard** the agent calls over HTTP/CLI — the agent can only send intents, never widen its own scope.
+
+---
+
+## The problem
+
+LLMs are increasingly used as agents — systems that take actions in the world, not just generate text. That creates a real safety problem that prompt engineering doesn't solve:
+
+- The model can be wrong, drift, or be manipulated
+- The model doesn't reliably stay within scope
+- The model doesn't reliably respect budget
+- There's no reliable way to stop the agent when something goes wrong
+- There's no reliable audit trail when something goes wrong
+- There's no reliable binding between the agent and the accountable user
+
+These aren't hypothetical. They're showing up in deployed systems now. And they're not solved by telling the model to be careful.
+
+---
+
+## What this framework does
+
+A safety protocol that sits between the agent and the world. Every action the agent wants to take passes through it. The protocol decides what happens. The agent cannot bypass it.
+
+**Binding** — the agent is unambiguously tied to a user. Every action is attributable. The binding can be on-chain (SBT-style, non-transferable, verifiable by anyone).
+
+**Scope** — what the agent can and can't do, enforced at the gate. **Deny-by-default**: an action is allowed only if a rule explicitly permits it. A closed action vocabulary (you name the verbs the agent may use) stops the model from inventing a new verb to bypass every rule. Each rule binds **five** things so a permission can't be deceptive: action type, target (exact/narrow, never catch-all prefix), HTTP method, a JSON-schema-style param binding, and a per-action cost cap. Forbidden targets use token matching (blocks `/api/admin` and `role=admin` but not `readmymind` or `administrator`); allowlists use exact/glob/regex and are normalized for casing. The model cannot talk its way around it — and a scope **linter** fails closed if a rule is too broad.
+
+**Budget** — hard limits on spend. The protocol blocks actions that would exceed the budget. This is infrastructure, not a suggestion.
+
+**Approval gates** — consequential actions need human sign-off. Above a cost threshold, critical urgency, or configured action types.
+
+**Monitoring** — live visibility into what the agent is doing. Action counts, costs, pending approvals, alerts for anomalies.
+
+**Audit trail** — immutable, append-only log. Every event hashed into a chain so tampering is detectable. Complete reconstruction of everything that happened.
+
+**Kill switch** — immediate, total freeze. All actions blocked. The user can stop the agent instantly.
+
+**On-chain binding** — SBT-style non-transferable binding. Anyone can verify: this agent is bound to this user. The binding is permanent (non-transferable) and revocable by the user.
+
+**On-chain audit** — key events recorded on-chain: binding, high-value actions, approvals, kill switch, scope violations. Verifiable, tamper-resistant, public.
+
+**Insurance interface** — claims-ready evidence and underwriter-ready reports. The protocol's audit trail and on-chain record feed insurance claims. The control configuration feeds underwriting. The controls reduce insurable exposure.
+
+---
+
+## Architecture
+
+```
+Layer 0 (off-chain): Runtime
+    LLM inference, reasoning, planning, memory, tool access
+    The agent's brain. Expensive, latency-sensitive. Stays off-chain.
+
+Layer 1 (the protocol): Policy & Enforcement
+    Binding | Scope | Budget | Approval | Monitoring | Audit (off-chain) | Kill switch
+    Every action passes through here. The agent cannot bypass.
+
+Layer 2 (on-chain): Anchors
+    SBT/ERC-8004 binding (non-transferable, verifiable)
+    On-chain audit for key events (binding, high-value, approvals, kill switch, violations)
+    Settlement (x402, stablecoins) when payments are involved
+
+Layer 3 (economic trust): Insurance
+    Claims evidence from audit trail + on-chain record
+    Underwriter reports from control configuration
+    Control-adjusted exposure (better controls → lower exposure → lower premium)
+```
+
+The chain doesn't run the agent. It anchors the binding, records the key events, and settles payments. The protocol enforces at runtime. Insurance backs the residual.
+
+---
+
+## Quick start
+
+### Basic protocol
+
+```python
+from safety_protocol import (
+    SafetyProtocol, BoundAgent, ScopeRule, AuditTrail, Monitor
+)
+from safety_protocol.scope_linter import lint_rules, Severity
+
+# Create audit trail
+audit = AuditTrail()
+
+# Scope is DENY-BY-DEFAULT and LEAST-PRIVILEGE: a rule binds FIVE things.
+# This is exact-target, method-bound, param-validated, capped — not a
+# catch-all prefix (a prefix on /v1/ would also permit /v1/admin).
+protocol = SafetyProtocol(
+    agent_id="agent-001",
+    user_id="alice",
+    scope_rules=[
+        ScopeRule(
+            action_type="api_call",
+            allowed_targets=["https://api.example.com/v1/search",
+                              "https://api.example.com/v1/summarize"],
+            match="exact",                  # exact, never catch-all prefix
+            methods=["POST"],               # only the verb it should use
+            param_schema={                  # params MUST satisfy this
+                "required": ["query"],
+                "properties": {"query": {"type": "string", "maximum": 500}},
+                "additional_properties": False,
+            },
+            forbidden_targets=["admin", "billing"],
+            forbid_match="token",           # blocks /api/admin, role=admin; not readmymind
+            max_cost=5.0,                   # per-action hard cap
+        ),
+    ],
+    budget_limit=50.0,
+    approval_threshold_cost=10.0,
+    audit=audit,
+    allowed_action_types=["api_call", "spend", "send_message"],  # closed verb vocabulary
+)
+
+# Lint before you trust it: a broad/self-contradictory ruleset must block.
+findings = lint_rules(protocol.scope_rules, protocol.allowed_action_types)
+assert not any(f.severity in (Severity.ERROR, Severity.WARN) for f in findings), \
+    "scope too broad to ship"
+
+# Create a bound agent
+agent = BoundAgent(
+    agent_id="agent-001",
+    user_id="alice",
+    safety_protocol=protocol,
+)
+
+# Agent proposes an action — protocol decides
+result = agent.propose_action(
+    action_type="api_call",
+    target="https://api.example.com/v1/search",
+    method="POST",
+    params={"query": "test"},
+    estimated_cost=2.50,
+)
+
+print(result.outcome)  # ActionOutcome.ALLOWED
+print(protocol.monitor.snapshot())  # Live status
+print(protocol.audit.reconstruct_sequence("agent-001"))  # Full audit
+```
+
+### Reference deployment (full architecture)
+
+```python
+from safety_protocol.deployment import ReferenceDeployment
+from safety_protocol import ScopeRule
+
+deployment = ReferenceDeployment(
+    agent_id="agent-001",
+    user_id="alice",
+    agent_name="ResearchAgent",
+    agent_role="AI research assistant",
+    scope_rules=[
+        ScopeRule(
+            action_type="api_call",
+            allowed_targets=["https://api.research.example/v1/search",
+                              "https://api.research.example/v1/summarize"],
+            match="exact",                  # least-privilege: exact, not a catch-all prefix
+            methods=["POST"],
+            param_schema={
+                "required": ["query"],
+                "properties": {"query": {"type": "string", "maximum": 500}},
+                "additional_properties": False,
+            },
+            forbidden_targets=["admin", "billing", "internal"],
+            forbid_match="token",
+            max_cost=8.0,
+        ),
+    ],
+    budget_limit=100.0,
+    approval_threshold=10.0,
+    high_value_threshold=25.0,
+)
+
+# Agent proposes action — full stack enforces
+result = deployment.agent_propose_action(
+    action_type="api_call",
+    target="https://api.research.example/v1/search",
+    params={"query": "AI safety 2026"},
+    estimated_cost=3.50,
+)
+
+# Get binding proof (verifiable by anyone)
+proof = deployment.get_binding_proof()
+
+# Get claims evidence (for insurance)
+evidence = deployment.get_claim_evidence(
+    claim_description="Agent made incorrect API call resulting in data loss",
+)
+
+# Get underwriter package (for binding coverage)
+underwriter = deployment.get_underwriter_package(
+    agent_description="Research agent that calls APIs and sends messages",
+    task_profile="API calls, message sending, limited compute",
+    max_potential_loss=50000.0,
+)
+```
+
+### Run the examples
+
+```bash
+git clone <repo-url>
+cd safety-protocol
+pip install -e .
+python examples/llm_agent.py         # LLM agent operating through the protocol
+python examples/reference_deployment.py  # Full architecture end-to-end
+python examples/scope_test.py         # 29 assertions on the scope perimeter
+python examples/scope_lint_demo.py    # the scope LINTER: catches broad rules
+python examples/safe_spend_demo.py    # safe payment agent (needs mock_merchant)
+python examples/settlement_demo.py    # real-settlement path (testnet-safe)
+python examples/cli.py lint --config examples/guard_config.json   # lint rules
+python examples/cli.py serve --config examples/guard_config.json   # HTTP guard
+python examples/agent_client.py       # a 'real' agent calling the guard
+```
+
+### The product: safe payment / spend agent (x402 guard)
+
+An agent that can move money via the [x402](https://x402.org) payment protocol — **but only after the SafetyProtocol gate clears the action.** Recipient allow/deny, per-payment cap, rolling budget, approval threshold, and kill switch all sit *between the agent's intent and the wallet's signature*. The wallet never signs a payment the gate didn't approve. That's the differentiator vs. raw x402, which trusts the caller.
+
+```bash
+# Terminal 1 — a mock x402 merchant (real 402 + signed-authorization verification)
+python examples/mock_merchant.py
+
+# Terminal 2 — the gated agent
+python examples/safe_spend_demo.py
+```
+
+The demo runs five cases, all enforced by the gate before any signing:
+
+| Case | What happens | Wallet signed? |
+|------|--------------|----------------|
+| Normal $0.10 to trusted merchant | allowed → signed → paid (200) | yes |
+| Forbidden recipient (token `evil`) | blocked by deny-by-default | **no** |
+| $50 over per-payment cap | blocked by scope | **no** |
+| $0.75 over approval threshold | pending → human approves → retry pays | after approval |
+| Kill switch engaged | everything blocked | **no** |
+
+The signing primitive is pluggable: the demo uses HMAC over the canonical x402 V2 / EIP-3009 envelope (zero deps, runs anywhere). In production, swap `SimWallet` for a real EIP-3009 signer (`eth_account` / EIP-712) — the envelope shape and the gate logic are unchanged. The merchant offloads verification + settlement to an x402 facilitator (Coinbase CDP, etc.).
+
+#### Real settlement (testnet-safe)
+
+`RealWallet` holds the production signing path: real secp256k1 keys via `eth_account`, building and signing EIP-3009 `transferWithAuthorization` (USDC on Base). It is gated by `LIVE=False` by default — **no funds move unless you explicitly set `LIVE=True`, install `eth_account`, and load a funded key.** `SafeSpendAgent.settle_real()` runs the gate *first*; a blocked or pending action never reaches signing.
+
+```bash
+python examples/settlement_demo.py   # builds the EIP-3009 struct, refuses to go live
+```
+
+```python
+from safety_protocol import RealWallet, SafeSpendAgent
+
+rw = RealWallet(private_key=KEY_FROM_SECRET_MANAGER, live=True, chain_id=8453)
+agent = SafeSpendAgent(protocol, real_wallet=rw, live=True)
+auth = agent.settle_real(recipient, 0.10)   # gate clears -> signed EIP-3009
+# POST auth to a x402 facilitator / submit to the USDC contract
+```
+
+**Honesty note:** in this repo's CI sandbox, `eth_account` isn't installed, so the crypto path is import-guarded (`HAS_REAL_CRYPTO`) and the demos run on the simulator. The production code is correct and ready — `pip install eth_account` + a funded key is the only thing between the demo and a real Base settlement.
+
+
+
+## Deployment: the guard surface a real agent calls
+
+The framework is library code. To actually run an agent safely, you
+operate a **guard** that the agent must pass through. The guard:
+
+- Loads a **user-controlled config** (`examples/guard_config.json`) with
+  least-privilege rules.
+- **Lints the rules on startup and fails closed** — a broad or
+  self-contradictory ruleset means the guard refuses to start. The agent
+  can never widen its own scope; it only sends *intents*.
+- Exposes two surfaces over the `SafetyProtocol` + `SafeSpendAgent`:
+  - **HTTP** (any agent, any language, via stdlib `http.server`)
+  - **CLI** (`safety-guard serve | check | pay | lint`)
+
+```
+POST /guard      {action_type, target, method?, params?, cost?}  -> allow/block
+POST /pay        {recipient, usd, resource?}                     -> gated payment
+POST /approve    {token, approved, approver}                     -> human sign-off
+POST /killswitch {reason}                                        -> kill switch
+GET  /audit      -> immutable decision log
+GET  /health     -> status + lint summary
+```
+
+The agent proposes; the guard disposes. On `allowed` it proceeds, on
+anything else it stops. See `examples/agent_client.py` for a complete
+agent integration (it never touches the rules).
+
+```bash
+# Terminal 1 — the guard (fails closed if rules fail lint)
+python examples/cli.py serve --config examples/guard_config.json
+
+# Terminal 2 — a real agent calling it
+python examples/agent_client.py
+
+# Or ask the guard directly (CI / pre-action checks)
+python examples/cli.py check --config examples/guard_config.json \
+    --action api_call --target https://api.research.example/v1/search \
+    --method POST --params '{"query":"hi"}'
+python examples/cli.py lint --config examples/guard_config.json   # exit 1 if too broad
+```
+
+**Why this is the right shape:** the rules live in a config the *user*
+owns and lints. The agent gets an HTTP/CLI boundary it cannot negotiate
+around. Runtime enforcement stays in infrastructure, not in prompts.
+
+---
+
+**Real:**
+- The safety protocol (scope, budget, approval, monitoring, audit trail, kill switch)
+- The binding enforcement (agent cannot act without passing through the protocol)
+- The audit trail (immutable, hashed chain, verifiable)
+- The insurance interface (claims evidence, underwriter reports, exposure estimates)
+
+**Simulated (same interface as production):**
+- On-chain binding (SBT / ERC-5192 / ERC-8004) — in-memory simulation. Same interface as a real smart contract. Swap in the real chain in production.
+- On-chain audit — in-memory simulation. Same interface. Swap in real chain events in production.
+
+**To make it production:**
+- Run rules through `lint_rules()` in CI — fail the deploy on any ERROR/WARN (catch-all prefix, missing method/param binding, no per-rule cap, self-contradiction)
+- Operate the `GuardService` (HTTP/CLI) so the agent calls the gate and can't widen its own scope
+- Replace the simulated on-chain layer with real ERC-5192 or ERC-8004 on Ethereum or an L2
+- For real USDC settlement: `pip install eth_account`, load a funded key out-of-band, set `RealWallet(live=True)` + `SafeSpendAgent(live=True)`
+- Connect the insurance interface to a real insurer's claims process
+- Wire it to a real LLM (OpenAI, Anthropic, local model)
+- Set the specific scope rules, budget, and approval thresholds for your use case
+
+---
+
+## What this is and isn't
+
+**This is:**
+- A reference architecture for safe, accountable agents
+- An enforcement layer that makes the agent operable
+- A binding mechanism that ties the agent to an accountable user
+- An audit trail that reconstructs what happened
+- An insurance interface that makes the agent insurable
+
+**This isn't:**
+- A product that prevents all agent failures
+- A replacement for good agent design
+- A fully productionized on-chain deployment (that's up to you to wire to a real chain)
+- Insurance itself (it provides evidence to insurance, it isn't an insurer)
+
+---
+
+## Scope is the foundation — vague rules make everything else decorative
+
+The other controls (budget, approval, audit, kill switch) only matter if scope actually defines a perimeter. If scope is "block what you remembered to forbid," the model can do anything you didn't think of — and every other control is decoration.
+
+Three properties make scope real, not decorative:
+
+1. **Deny-by-default.** An action is allowed only if a rule *explicitly permits* it. No rule matches → denied. You build an allowlist of what the agent may touch, not a hope that you forbade everything dangerous.
+2. **Closed action vocabulary.** You name the verbs the agent may use (`api_call`, `spend`, `send_message`). An action whose type isn't in that set is blocked before any rule is consulted — so the model can't invent `internal_transfer` or `spawn_subagent_v2` to slip past the rules.
+3. **Precise target matching.** Forbidden targets use token matching: `admin` blocks `/api/admin` and `?role=admin`, but not `readmymind` or `administrator` (whole-token, no false positives). Allowlists use prefix/glob/exact/regex, and targets are normalized (casing, repeated slashes) so `HTTPS://API.X/V1/Users` and `https://api.x/v1/users` are the same.
+
+**A broad allowlist makes the other controls decorative.** The trap: `allowed_targets=["https://api.x/v1/"]` with `match="prefix"` looks scoped, but it also permits `/v1/admin` and `/v1/delete-everything`. A rule must bind **five** things to be least-privilege:
+
+- **action_type** — from the closed vocabulary (above).
+- **target** — exact or narrow prefix/glob, never a catch-all prefix.
+- **method** — only the HTTP verb the rule means (`GET`, not `GET`+`DELETE`).
+- **params** — a JSON-schema-style `param_schema` the params MUST satisfy (required keys, types, enums, ranges). `?confirm=true` can't slip through an "allowed" endpoint.
+- **max_cost** — a per-rule spend cap, the real bound (the global budget only catches volume, not a single oversized action).
+
+```bash
+python examples/scope_test.py   # 29 assertions: deny-by-default, vocabulary,
+                                 # token matching, method + param binding,
+                                 # and the broad-prefix-vs-tight-rule trap
+```
+
+**A linter catches broad rules before they ship.** Even with the five bindings available, a human can still write a loose rule. `lint_rules()` statically inspects your ruleset and flags the ways it's broader than least-privilege — `CATCH_ALL_PREFIX` (ERROR), `NO_METHOD` / `NO_PARAM_SCHEMA` / `NO_PER_RULE_CAP` / `BLANKET_ALLOW` (WARN), `ALLOW_FORBID_CONFLICT` (ERROR), and dead verbs (INFO). Wire it into CI or a pre-deploy check: any ERROR/WARN blocks the deploy.
+
+```bash
+python examples/scope_lint_demo.py  # proves the linter flags the OLD broad
+                                     # rule and clears the NEW tight one
+```
+
+```python
+from safety_protocol import lint_rules, Severity
+findings = lint_rules(rules, allowed_action_types)
+if any(f.severity in (Severity.ERROR, Severity.WARN) for f in findings):
+    raise SystemExit("scope too broad to ship")
+```
+
+---
+
+## Agent Insurance Simulator
+
+The framework isn't just enforceable — it's **quantifiable**. The
+insurance interface (claims evidence, underwriter reports, exposure
+estimates) is the bridge between the runtime controls and a price. The
+simulator closes that loop: it Monte-Carlos an agent's life *through the
+real `SafetyProtocol.execute()` gate*, prices the premium, and draws the
+loss curve.
+
+```bash
+python examples/agent_insurance_sim.py --runs 1000 --events 200 --seed 42
+python examples/agent_insurance_sim.py --quick            # 50 runs, fast
+python examples/agent_insurance_sim.py --curve --svg examples/loss_curve.svg
+python examples/agent_insurance_sim.py --claim            # real InsuranceInterface evidence
+python examples/agent_insurance_sim.py --tamagotchi       # interactive
+```
+
+**What it proves (1,000 runs, 200 events each, seed 42):**
+
+| metric | with controls | no controls |
+|---|---|---|
+| mean loss / run | $252 | $62,514 |
+| p95 | $1,000 | $89,046 |
+| max | $3,000 | $112,850 |
+
+- **Exposure reduction: 99.6%** from controls.
+- **Premium: $275/run with controls vs $2,400 without** — 89% cheaper.
+- The non-zero residual is **authorized misuse** — actions that pass the
+  gate (in-scope, within budget) but are still harmful. Scope/budget
+  can't see intent; that's exactly what insurance + kill switch backstop.
+
+**Four modes:**
+- **Batch (`--runs`)** — Monte Carlo the loss distribution and recommend a parametric premium.
+- **`--curve`** — draws the cumulative-loss trace (controls vs no-controls) as a terminal chart, with `--svg` to export a standalone file.
+- **`--claim`** — runs one representative run and emits the *real*
+  `InsuranceInterface` claims + underwriter package, backed by a
+  populated `DualAudit`/`OnChainAudit` (`on_chain_verifiable: True`,
+  scope violations blocked, submission ready).
+- **`--tamagotchi`** — interactive: you feed the agent tasks, the real
+  gate decides, the kill switch fires on 3 consecutive misuse events,
+  and the live loss sparkline + premium update as you go.
+
+Single file, stdlib + the framework. No DB, no web. Event generation,
+the gate bridge (`_record_dual`), and the actuarial layer are all
+separable — swap `InsuranceEngine` for a real pricing model, or point
+`--claim` at a live `DualAudit`.
+
+---
+
+The user is the accountable party. The user monitors. The user builds safety protocols. The agent doesn't run unsupervised.
+
+The agent's mess-ups are how we learn lessons. But the safety protocols exist so the first lesson isn't a catastrophe. The binding exists so accountability is clear. The audit trail exists so we can reconstruct what happened. The insurance interface exists so the consequences are survivable.
+
+The model can be wrong. The protocol doesn't care. The protocol enforces what it enforces, regardless of what the model wants.
+
+This is how we build reliable agents. Not by hoping the model behaves. By enforcing constraints in infrastructure.
+
+---
+
+## Status
+
+Alpha. The protocol works. The reference deployment works. The on-chain layer is simulated (same interface as production). The insurance interface provides evidence and reports — it's not connected to a real insurer.
+
+The safe-payment product (`SafeSpendAgent`) works end-to-end behind a real 402/x402 merchant (see `examples/mock_merchant.py`). The signing is simulator-grade (HMAC) by default; the production EIP-3009 path (`RealWallet`) is written and import-guarded, and goes live only with `LIVE=True` + `eth_account` + a funded key.
+
+The scope layer is least-privilege (five bindings, enforced) and ships with a linter (`lint_rules`) that blocks broad rules before deploy.
+
+The guard surface (`GuardService` + `cli.py`) turns the framework into a runnable service: a user-controlled, linted-on-load config, an HTTP/CLI boundary the agent cannot widen, and fail-closed startup.
+
+**What you get in this repo:**
+- `SafetyProtocol` — the enforcement layer (scope, budget, approval, audit, kill switch), deny-by-default
+- `ScopeRule` + `lint_rules()` — least-privilege rules (five bindings) and a linter that **fails closed** on broad/self-contradictory rules
+- `SafeSpendAgent` + `RealWallet` — x402/USDC payment guard; the wallet only signs what the gate cleared (production EIP-3009 path, gated behind `LIVE=True`)
+- `GuardService` + `cli.py` — HTTP/CLI guard a real agent calls; the agent sends intents, never edits rules
+- Examples: `llm_agent`, `reference_deployment`, `scope_test` (29 assertions), `scope_lint_demo`, `safe_spend_demo` (+ `mock_merchant`), `settlement_demo`, `agent_client`, `guard_config.json`, `agent_insurance_sim`
+
+Use it as a reference architecture. Wire it to your LLM, your chain, your insurer. Adapt the scope rules, budget, and thresholds to your use case.
+
+---
+
+## Author
+
+Michael — building safe, accountable agents with verifiable binding and insurance-ready evidence.
+
+---
+
+## License
+
+MIT

@@ -1,0 +1,9 @@
+{
+  "network": "base-sepolia",
+  "chain_id": 84532,
+  "usdc_address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "payer_address": "0x613F84EB7135C5ce36A706790b5FcEcAc3D5906e",
+  "payer_private_key_hex": "0d7f79670dee3f4e3ef3d08d958e2660c5f6e851899b4e17454d663d955344ac",
+  "payee_address": "0x1CF815B3d76D4d2d3854DDD0974E1294e9b891ce",
+  "note": "Testnet only. Fund via faucets, then set LIVE=True to settle."
+}

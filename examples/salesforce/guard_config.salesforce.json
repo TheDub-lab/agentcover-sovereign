@@ -1,0 +1,61 @@
+{
+  "agent_id": "agentforce-agent-01",
+  "user_id": "nyk-systems",
+  "budget_limit": 50.0,
+  "approval_threshold_cost": 5.0,
+  "allowed_action_types": ["api_call", "send_message", "payment"],
+  "scope_rules": [
+    {
+      "action_type": "api_call",
+      "allowed_targets": [
+        "https://api.salesforce.com/v1/accounts",
+        "https://api.salesforce.com/v1/contacts",
+        "https://api.salesforce.com/v1/opportunities",
+        "https://your-allowed-integration.example.com/v1/sync"
+      ],
+      "match": "prefix",
+      "methods": ["POST", "GET", "PATCH"],
+      "forbidden_targets": ["admin", "billing", "internal", "config", "production", "delete"],
+      "forbid_match": "token",
+      "max_cost": 2.00,
+      "param_schema": {
+        "required": ["query"],
+        "properties": {
+          "query": {"type": "string", "maximum": 200}
+        },
+        "additional_properties": false
+      }
+    },
+    {
+      "action_type": "send_message",
+      "allowed_targets": ["nyk-team-channel", "sales-ops"],
+      "match": "exact",
+      "methods": ["send_message"],
+      "param_schema": {
+        "required": ["channel", "body"],
+        "properties": {
+          "channel": {"type": "string", "enum": ["nyk-team-channel", "sales-ops"]},
+          "body": {"type": "string", "maximum": 1000}
+        },
+        "additional_properties": false
+      }
+    },
+    {
+      "action_type": "payment",
+      "allowed_targets": ["0xYourApprovedMerchant1111111111111111111111"],
+      "match": "exact",
+      "methods": ["x402"],
+      "param_schema": {
+        "required": ["resource"],
+        "properties": {
+          "resource": {"type": "string", "enum": ["data-sync", "compute"]},
+          "memo": {"type": "string", "maximum": 280}
+        },
+        "additional_properties": false
+      },
+      "forbidden_targets": ["evil", "scam", "rug"],
+      "forbid_match": "token",
+      "max_cost": 5.00
+    }
+  ]
+}
