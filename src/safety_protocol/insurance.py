@@ -10,9 +10,9 @@ Provides:
 
 The key insight: the safety protocol doesn't replace insurance. It makes
 the agent insurable by providing:
-1. Evidence of what happened (audit trail + on-chain record)
+1. Evidence of what happened (audit trail + simulated on-chain record)
 2. Evidence of controls operating (blocked violations, approvals)
-3. Verifiable binding (on-chain, non-transferable)
+3. Simulated verifiable binding (non-transferable by interface contract)
 4. Control-adjusted exposure (controls reduce the risk, which reduces premium)
 
 This is how the protocol lowers insurance cost and makes claims processable.
@@ -51,39 +51,53 @@ class InsuranceInterface:
         - What the agent was authorized to do (scope)
         - What the agent actually did (audit trail)
         - What controls operated (blocked violations, approvals)
-        - Verifiable on-chain record (tamper-resistant)
+        - Simulated on-chain record (in-memory reference implementation)
 
         The binding ties the agent to a specific user (accountable party).
         The audit trail reconstructs what happened.
         The on-chain events are verifiable by anyone.
         """
         evidence = self.dual_audit.get_claims_evidence(agent_id)
+        has_claim_details = bool(agent_id and claim_description.strip())
+        has_evidence = (
+            evidence["off_chain_events"] > 0 and
+            evidence["on_chain_events"] > 0
+        )
+        claim_ready = has_claim_details and has_evidence
 
         return {
-            "claim_prepared": True,
+            "claim_prepared": claim_ready,
             "agent_id": agent_id,
             "claim_description": claim_description,
             "claimed_loss_amount": claimed_loss_amount,
             "binding": {
-                "agent_bound_to_user": True,
-                "binding_type": "on_chain_soulbound",
-                "verifiable_by_underwriter": True,
-                "binding_proof_available": True,
+                "agent_bound_to_user": evidence["binding_events"] > 0,
+                "binding_type": "simulated_on_chain_soulbound",
+                "verifiable_by_underwriter": False,
+                "binding_proof_available": evidence["binding_events"] > 0,
             },
             "evidence": evidence,
             "controls_operated": evidence["controls_evidence"],
-            "full_audit_available": True,
-            "on_chain_verifiable": evidence["on_chain_events"] > 0,
-            "submission_ready": True,
+            "full_audit_available": evidence["off_chain_events"] > 0,
+            "on_chain_verifiable": False,
+            "on_chain_backend": "simulated_in_memory",
+            "submission_ready": claim_ready,
+            "readiness_checks": {
+                "claim_details_present": has_claim_details,
+                "off_chain_evidence_present": evidence["off_chain_events"] > 0,
+                "simulated_on_chain_evidence_present": evidence["on_chain_events"] > 0,
+            },
             "instructions": (
-                "Submit this evidence package to your insurer. It includes: "
-                "complete off-chain audit trail, on-chain verifiable events, "
+                "This reference package is not proof of a deployed blockchain "
+                "record. It includes: complete off-chain audit trail, simulated "
+                "in-memory on-chain events, "
                 "evidence of controls operating (scope violations blocked, "
                 "approval events, high-value action records, killswitch events), "
                 "and on-chain binding proof. The binding ties this agent to a "
-                "specific accountable user. The audit trail reconstructs exactly "
-                "what happened. The on-chain events are tamper-resistant and "
-                "verifiable by anyone."
+                "specific accountable user. The audit trail reconstructs what "
+                "happened. Replace the simulated backend with a deployed smart "
+                "contract before describing evidence as publicly verifiable or "
+                "tamper-resistant."
             ),
         }
 
@@ -108,20 +122,26 @@ class InsuranceInterface:
         reduce premium through control-adjusted exposure.
         """
         report = self.dual_audit.get_underwriter_report(agent_id)
+        has_package_details = bool(
+            agent_id and agent_description.strip() and task_profile.strip()
+            and max_potential_loss >= 0
+        )
+        has_evidence = report["control_summary"]["audit_trail_complete"]
+        package_ready = has_package_details and has_evidence
 
         return {
-            "underwriter_package": True,
+            "underwriter_package": package_ready,
             "agent_id": agent_id,
             "agent_description": agent_description,
             "task_profile": task_profile,
             "max_potential_loss": max_potential_loss,
             "control_configuration": {
-                "on_chain_binding": "non-transferable (SBT/ERC-5192)",
+                "on_chain_binding": "simulated non-transferable binding (SBT/ERC-5192 interface)",
                 "scope_enforced_at_runtime": True,
                 "budget_limit": "configured",
                 "approval_gates": "configured for consequential actions",
                 "monitoring": "live visibility with alerts",
-                "audit_trail": "complete off-chain + verifiable on-chain",
+                "audit_trail": "complete off-chain + simulated in-memory on-chain",
                 "killswitch": "immediate, total freeze",
             },
             "control_health": report["control_summary"],
@@ -132,8 +152,9 @@ class InsuranceInterface:
                 f"Controls have operated {report['control_summary']['scope_violations_prevented']} times "
                 f"(blocking violations) and required human approval "
                 f"{report['control_summary']['human_oversight_events']} times. "
-                f"On-chain binding is non-transferable. Audit trail is complete "
-                f"and verifiable. Kill switch available. "
+                f"The reference binding is non-transferable by interface semantics, "
+                f"but the on-chain layer is simulated in memory. Audit trail is "
+                f"complete in this run. Kill switch available. "
                 f"This control configuration reduces insurable exposure relative "
                 f"to an agent without these controls."
             ),
@@ -146,7 +167,12 @@ class InsuranceInterface:
                 "Consider parametric component for clean triggers (e.g., agent "
                 "exceeds budget — verifiable from audit trail)."
             ),
-            "package_ready": True,
+            "package_ready": package_ready,
+            "readiness_checks": {
+                "package_details_present": has_package_details,
+                "off_chain_evidence_present": has_evidence,
+                "deployed_on_chain_backend": False,
+            },
         }
 
     def get_exposure_reduction_estimate(self, agent_id: str) -> dict:
@@ -178,7 +204,7 @@ class InsuranceInterface:
                 "monitoring": "Early detection of problems. Enables intervention before damage compounds.",
                 "audit_trail": "Evidence for claims. Makes losses processable and verifiable.",
                 "killswitch": "Recovery mechanism. Limits damage when something goes wrong.",
-                "on_chain_verifiable_events": "Tamper-resistant evidence. Reduces claims dispute risk.",
+                "on_chain_verifiable_events": "Simulated in-memory evidence only; deploy a smart contract for tamper-resistant verification.",
             },
             "estimated_exposure_reduction": (
                 "Significant. Full safety protocol stack reduces insurable exposure "

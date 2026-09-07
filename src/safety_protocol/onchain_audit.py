@@ -12,7 +12,8 @@ but the ones that matter for accountability and claims:
 - Revocation events (binding revoked)
 - Scope violations (blocked actions — evidence of controls working)
 
-The on-chain record is tamper-resistant and publicly verifiable.
+The reference on-chain record is simulated in memory. A deployed chain would
+provide tamper resistance and public verification in production.
 Anyone can check: did this happen? when? what was the state?
 
 This is the evidence layer that feeds into insurance claims and
@@ -232,7 +233,8 @@ class DualAudit:
         providing evidence of controls. It includes:
 
         - Complete off-chain record (everything that happened)
-        - On-chain verifiable events (the ones that matter, tamper-resistant)
+                - Simulated in-memory on-chain events (the ones that matter; deploy a
+                    smart contract for tamper-resistant verification)
         - Scope violations (evidence the controls operated)
         - Approvals (evidence of human oversight)
         - High-value actions (evidence of consequential events)
@@ -247,11 +249,13 @@ class DualAudit:
         approvals = self.on_chain.get_approval_events(agent_id)
         high_value = self.on_chain.get_high_value_events(agent_id)
         killswitch = self.on_chain.get_killswitch_events(agent_id)
+        binding_events = self.on_chain.get_binding_events(agent_id)
 
         return {
             "agent_id": agent_id,
             "off_chain_events": len(off_chain),
             "on_chain_events": len(on_chain),
+            "binding_events": len(binding_events),
             "on_chain_events_detail": [
                 {
                     "event_type": e.event_type,
@@ -284,12 +288,12 @@ class DualAudit:
                 "high_value_actions": len(high_value),
                 "killswitch_events": len(killswitch),
             },
-            "claims_ready": True,
+            "claims_ready": bool(off_chain and on_chain),
             "evidence_description": (
-                "Complete off-chain audit trail + on-chain verifiable events. "
-                "On-chain events are tamper-resistant and publicly verifiable. "
-                "Off-chain trail provides full context. Together they reconstruct "
-                "everything that happened with the agent."
+                "Complete off-chain audit trail + simulated in-memory on-chain "
+                "events. A deployed chain is required for tamper-resistant, "
+                "publicly verifiable evidence. The off-chain trail provides full "
+                "context and the reference events reconstruct key activity."
             ),
         }
 
@@ -310,15 +314,17 @@ class DualAudit:
 
         return {
             "agent_id": agent_id,
-            "underwriter_ready": True,
+            "underwriter_ready": bool(
+                evidence["off_chain_events"] > 0 and evidence["on_chain_events"] > 0
+            ),
             "control_summary": {
                 "scope_enforced": total_blocked > 0,  # Has the scope gate fired?
                 "scope_violations_prevented": total_blocked,
                 "human_oversight_events": total_approvals,
                 "killswitch_available": True,
-                "binding_on_chain": True,
+                "binding_on_chain": False,
                 "audit_trail_complete": evidence["off_chain_events"] > 0,
-                "on_chain_verifiable_events": evidence["on_chain_events"] > 0,
+                "on_chain_verifiable_events": False,
             },
             "control_operation_history": evidence["controls_evidence"],
             "exposure_indicators": {
@@ -327,13 +333,15 @@ class DualAudit:
                 "control_health": "operational" if total_blocked > 0 or total_approvals > 0 else "no incidents recorded",
             },
             "underwriting_notes": (
-                "Agent operates with enforced safety protocols: binding on-chain, "
+                "Agent operates with enforced safety protocols and a simulated "
+                "in-memory on-chain reference layer: "
                 "scope enforced at runtime, budget caps, approval gates for "
                 "consequential actions, monitoring with alerts, immutable audit "
                 "trail (off-chain + on-chain), and kill switch. Controls have "
                 f"operated {total_blocked} times (blocked violations) and "
                 f"required human approval {total_approvals} times. "
-                "On-chain binding is non-transferable (SBT). Audit trail is "
-                "complete off-chain and verifiable on-chain for key events."
+                "The reference binding is non-transferable by interface semantics. "
+                "A deployed smart contract is required before describing the "
+                "audit trail as publicly verifiable or tamper-resistant."
             ),
         }
