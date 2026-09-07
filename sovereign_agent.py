@@ -1,6 +1,6 @@
 import os
 from openai import OpenAI
-from safety_protocol import SafetyProtocol, ProtocolViolation
+from safety_protocol import ActionOutcome, ReferenceDeployment, ScopeRule
 from agent_capabilities import SovereignMemory, SKILLS
 
 class SovereignAgent:
@@ -10,7 +10,38 @@ class SovereignAgent:
             api_key=api_key
         )
         self.model = model
-        self.protocol = SafetyProtocol()
+        self.protocol = ReferenceDeployment(
+            agent_id="sovereign-agent",
+            user_id="local-user",
+            agent_name="Sovereign Agent",
+            agent_role="Personal AI assistant",
+            scope_rules=[
+                ScopeRule(
+                    action_type="read_notes",
+                    allowed_targets=["local_notes"],
+                    match="exact",
+                    param_schema={
+                        "required": ["query"],
+                        "properties": {"query": {"type": "string"}},
+                    },
+                    max_cost=0.0,
+                ),
+                ScopeRule(
+                    action_type="send_email",
+                    allowed_targets=["email"],
+                    match="exact",
+                    param_schema={
+                        "required": ["recipient", "body"],
+                        "properties": {
+                            "recipient": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                    },
+                    max_cost=0.0,
+                ),
+            ],
+            allowed_action_types=list(SKILLS),
+        )
         self.memory = SovereignMemory()
 
     def _call_llm(self, prompt, system_prompt="You are a Sovereign Personal AI."):
@@ -53,18 +84,20 @@ class SovereignAgent:
 
         # 2. Safety Gate (The Safety Protocol checks if the skill is allowed)
         print(f"🛡️ Checking Safety Protocol for {skill_name}...")
-        try:
-            # Check if the agent's current session has the required scope for this skill
-            # For the demo, we simulate 'read_only' as allowed and 'financial_write' as blocked
-            if skill.required_scope == "financial_write":
-                raise ProtocolViolation("Unauthorized Scope: Financial Write access is forbidden.")
-            
-            # Check budget (simulated)
-            self.protocol.check_budget(f"Execution of {skill_name}")
-            
-        except ProtocolViolation as e:
-            print(f"🚫 [BLOCKED] {e}")
-            return f"Safety Protocol Block: {e}"
+        action_targets = {
+            "read_notes": "local_notes",
+            "send_email": "email",
+            "access_bank": "bank_account",
+        }
+        result = self.protocol.agent_propose_action(
+            action_type=skill_name,
+            target=action_targets.get(skill_name, skill_name),
+            params=args,
+        )
+        if result.outcome != ActionOutcome.ALLOWED:
+            reason = result.block_reason or result.outcome.value
+            print(f"🚫 [BLOCKED] {reason}")
+            return f"Safety Protocol Block: {reason}"
 
         # 3. Execution Phase
         print(f"🚀 Executing {skill_name}...")
