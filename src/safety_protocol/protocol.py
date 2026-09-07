@@ -400,37 +400,45 @@ class SafetyProtocol:
         """
         # 1. Binding check
         if not self.verify_binding():
-            return ActionResult(
+            result = ActionResult(
                 request.request_id,
                 ActionOutcome.BLOCKED_SCOPE,
                 block_reason="Agent binding revoked — no actions permitted",
             )
+            self.monitor.record_action(result, request)
+            return result
 
         # 2. Kill switch check
         if self._state == ProtocolState.FROZEN:
-            return ActionResult(
+            result = ActionResult(
                 request.request_id,
                 ActionOutcome.BLOCKED_KILLSWITCH,
                 block_reason="Protocol frozen by kill switch — all actions blocked",
             )
+            self.monitor.record_action(result, request)
+            return result
 
         # 3. Scope check
         scope_violation = self._check_scope(request)
         if scope_violation:
-            return ActionResult(
+            result = ActionResult(
                 request.request_id,
                 ActionOutcome.BLOCKED_SCOPE,
                 block_reason=scope_violation,
             )
+            self.monitor.record_action(result, request)
+            return result
 
         # 4. Budget check
         budget_violation = self._check_budget(request)
         if budget_violation:
-            return ActionResult(
+            result = ActionResult(
                 request.request_id,
                 ActionOutcome.BLOCKED_BUDGET,
                 block_reason=budget_violation,
             )
+            self.monitor.record_action(result, request)
+            return result
 
         # 5. Approval gate
         if self._needs_approval(request):
