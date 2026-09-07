@@ -245,10 +245,11 @@ class OnChainBoundProtocol:
 
     def get_binding_proof(self) -> dict:
         """
-        Return a binding proof that can be shown to third parties.
+        Return a binding record for the reference deployment.
 
-        This is what you show to an underwriter, a counterparty, or
-        anyone who needs to verify the agent is bound to this user.
+        The reference implementation uses in-memory state. It is useful for
+        protocol-level enforcement and local inspection, but is not third-party
+        verifiable until a real contract is deployed.
 
         In production, this includes the on-chain tx hash, block number,
         and the user's cryptographic signature.
@@ -260,12 +261,13 @@ class OnChainBoundProtocol:
             "on_chain": on_chain,
             "protocol_binding": self.protocol.binding,
             "combined_valid": self.check_binding(),
-            "proof_type": "on_chain_soulbound",
+            "on_chain_backend": "simulated_in_memory",
+            "proof_type": "simulated_on_chain_soulbound",
             "proof_description": (
-                "This agent is non-transferably bound to this user. "
-                "The binding is recorded on-chain and enforced at runtime. "
-                "Anyone can verify: check the on-chain registry for this "
-                "agent_id. The binding is non-transferable (SBT property). "
-                "Only the user can revoke."
+                "This agent binding is enforced at the protocol level and "
+                "represented by simulated in-memory on-chain state. It is not "
+                "verifiable by third parties unless and until a real smart "
+                "contract is deployed. The reference binding is non-transferable "
+                "by interface semantics, and only the user can revoke it."
             ),
         }
