@@ -14,17 +14,18 @@ Every action the agent takes is attributable to the user.
 """
 
 from __future__ import annotations
-import uuid
+
 import time
-from typing import Any
+import uuid
+
 from .core import (
     ActionOutcome,
-    ProtocolState,
     ActionRequest,
     ActionResult,
-    ScopeRule,
     AuditTrail,
     Monitor,
+    ProtocolState,
+    ScopeRule,
     target_matches,
     validate_params,
 )
@@ -209,12 +210,12 @@ class SafetyProtocol:
                     # This rule permits the target. Now bind the OTHER
                     # dimensions of least-privilege — any one being broad
                     # makes the permission deceptive, so check them here.
-                    if rule.methods is not None and request.method is not None:
-                        if request.method.upper() not in [m.upper() for m in rule.methods]:
-                            return (
-                                f"Method {request.method} not permitted for "
-                                f"'{request.target}' — allowed: {rule.methods}"
-                            )
+                    if (rule.methods is not None and request.method is not None
+                            and request.method.upper() not in [m.upper() for m in rule.methods]):
+                        return (
+                            f"Method {request.method} not permitted for "
+                            f"'{request.target}' — allowed: {rule.methods}"
+                        )
                     if request.method is None and rule.methods is not None:
                         return (
                             f"Action omits HTTP method; rule requires one of "
@@ -239,12 +240,12 @@ class SafetyProtocol:
             # A rule with action_type match and no allowed_targets is a
             # blanket allowance for that verb (e.g. allow all "read_file").
             # Rare; explicit allowlists are preferred. Still bind method/params.
-            if rule.methods is not None and request.method is not None:
-                if request.method.upper() not in [m.upper() for m in rule.methods]:
-                    return (
-                        f"Method {request.method} not permitted for verb "
-                        f"'{request.action_type}' — allowed: {rule.methods}"
-                    )
+            if (rule.methods is not None and request.method is not None
+                    and request.method.upper() not in [m.upper() for m in rule.methods]):
+                return (
+                    f"Method {request.method} not permitted for verb "
+                    f"'{request.action_type}' — allowed: {rule.methods}"
+                )
             if rule.param_schema is not None:
                 reason = validate_params(request.params, rule.param_schema)
                 if reason:
@@ -308,10 +309,7 @@ class SafetyProtocol:
         if request.estimated_cost >= self.approval_threshold_cost:
             return True
 
-        if request.urgency == "critical":
-            return True
-
-        return False
+        return request.urgency == "critical"
 
     def request_approval(self, request: ActionRequest) -> str:
         """Submit an action for human approval. Returns approval token."""

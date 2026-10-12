@@ -122,8 +122,8 @@ what controls operated, what can be reconstructed. The binding + audit trail
 + on-chain record answer these questions. The insurance interface makes the
 agent insurable by providing claims-ready evidence.
 
-This is a reference architecture, not a product. The on-chain layer is
-simulated (same interface as real chain). In production, use ERC-5192 SBT or
+The enforcement library (Layer 1) is production-usable. The on-chain layer is
+simulated (same interface as a real chain). In production, use ERC-5192 SBT or
 ERC-8004 on a real chain, and connect the insurance interface to a real
 insurer's claims process.
 
@@ -142,26 +142,32 @@ Documentation:
 """
 from .core import (
     ActionOutcome,
-    ProtocolState,
     ActionRequest,
     ActionResult,
     ApprovalRecord,
-    ScopeRule,
     AuditTrail,
     Monitor,
+    ProtocolState,
+    ScopeRule,
 )
-from .protocol import SafetyProtocol, BoundAgent
-from .onchain import OnChainBindingRegistry, OnChainBoundProtocol
-from .onchain_audit import OnChainAudit, DualAudit
-from .insurance import InsuranceInterface
 from .deployment import ReferenceDeployment
-from .payments import SafeSpendAgent, SimWallet, PaymentEnvelope
-from .real_wallet import RealWallet, HAS_REAL_CRYPTO
-from .onchain_payment_verifier import OnChainPaymentVerifier
-from .scope_linter import lint_rules, lint_report, Finding, Severity
 from .guard_service import GuardService, build_protocol_from_config
+from .insurance import InsuranceInterface
+from .onchain import OnChainBindingRegistry, OnChainBoundProtocol
+from .onchain_audit import DualAudit, OnChainAudit
+from .onchain_payment_verifier import OnChainPaymentVerifier
+from .payments import PaymentEnvelope, SafeSpendAgent, SimWallet
+from .protocol import BoundAgent, SafetyProtocol
+from .real_wallet import HAS_REAL_CRYPTO, RealWallet
+from .scope_linter import Finding, Severity, lint_report, lint_rules
 
-__version__ = "0.2.0"
+try:
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _version
+
+    __version__ = _version("safety-protocol")
+except PackageNotFoundError:  # running from a source checkout
+    __version__ = "0.3.0"
 __all__ = [
     "ActionOutcome",
     "ProtocolState",
@@ -189,5 +195,7 @@ __all__ = [
     "lint_report",
     "Finding",
     "Severity",
+    "GuardService",
+    "build_protocol_from_config",
     "__version__",
 ]

@@ -18,12 +18,10 @@ Interface:
 """
 
 from __future__ import annotations
+
 import hashlib
 import time
-import uuid
 from dataclasses import dataclass, field
-from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Simulated on-chain state (same interface as real chain in production)

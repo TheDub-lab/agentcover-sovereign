@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+agent_memory.json
+.venv/
+
+# Build artifacts
+dist/
+build/
+*.egg
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/

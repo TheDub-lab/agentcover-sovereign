@@ -33,15 +33,15 @@ import json
 import os
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from .core import ActionOutcome, ActionRequest
-from .protocol import SafetyProtocol
-from .real_wallet import RealWallet, HAS_REAL_CRYPTO
 from .onchain_payment_verifier import OnChainPaymentVerifier
+from .protocol import SafetyProtocol
+from .real_wallet import HAS_REAL_CRYPTO, RealWallet
 
 DEFAULT_NETWORK = "eip155:8453"  # Base mainnet (CAIP-2)
 DEFAULT_ASSET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"  # USDC on Base
@@ -123,7 +123,7 @@ class PaymentEnvelope:
         ).decode()
 
     @classmethod
-    def from_wire(cls, wire: str) -> "PaymentEnvelope":
+    def from_wire(cls, wire: str) -> PaymentEnvelope:
         d = json.loads(base64.b64decode(wire))
         return cls(
             scheme=d["scheme"],

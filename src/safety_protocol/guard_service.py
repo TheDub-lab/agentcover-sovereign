@@ -26,22 +26,20 @@ Run:
 """
 
 from __future__ import annotations
+
 import argparse
 import json
-import sys
-import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
 
-# Allow running both as `python guard_service.py` and as a module.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from safety_protocol.core import (
-    ActionRequest, AuditTrail, ScopeRule, ActionOutcome,
+from .core import (
+    ActionOutcome,
+    ActionRequest,
+    AuditTrail,
+    ScopeRule,
 )
-from safety_protocol.protocol import SafetyProtocol
-from safety_protocol.payments import SafeSpendAgent, SimWallet
-from safety_protocol.scope_linter import lint_rules, lint_report, Severity
+from .payments import SafeSpendAgent, SimWallet
+from .protocol import SafetyProtocol
+from .scope_linter import Severity, lint_report, lint_rules
 
 
 # ---------------------------------------------------------------------------

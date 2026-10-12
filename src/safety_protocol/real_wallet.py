@@ -24,10 +24,9 @@ Install for production:  pip install eth-account
 """
 
 from __future__ import annotations
-import os
+
 import time
 import uuid
-from typing import Any
 
 try:
     from eth_account import Account
@@ -81,7 +80,7 @@ class RealWallet:
 
     # -- key lifecycle --------------------------------------------------
     @classmethod
-    def generate(cls, live: bool = False, **kw) -> "RealWallet":
+    def generate(cls, live: bool = False, **kw) -> RealWallet:
         """Create a fresh keypair (for testnet / dev only)."""
         if not HAS_REAL_CRYPTO:
             raise RuntimeError("eth_account required to generate keys")

@@ -1,6 +1,7 @@
 import json
 import os
 
+
 class SovereignMemory:
     def __init__(self, storage_path="agent_memory.json"):
         self.storage_path = storage_path

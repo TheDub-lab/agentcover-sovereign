@@ -1,17 +1,28 @@
 [project]
 name = "safety-protocol"
-version = "0.1.0"
+version = "0.3.0"
 description = "Safety protocol framework for LLM agents — binding, scope, enforcement, monitoring, approval, audit, killswitch"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
     {name = "Michael", email = "michael@example.com"}
 ]
+keywords = [
+    "ai-agents",
+    "agent-safety",
+    "agent-governance",
+    "authorization",
+    "llm",
+    "guardrails",
+    "scope",
+    "audit",
+    "killswitch",
+]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -20,10 +31,29 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Artificial Intelligence",
 ]
+
+# The guard, the scope linter, the audit trail and the reference deployment are
+# all stdlib. `pip install safety-protocol` gives a working guard and the tests
+# run with no network. Optional integrations are extras below.
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.1.0"]
+# Payment verification against a chain via a public JSON-RPC endpoint.
+onchain = ["requests>=2.31"]
+# Real EIP-3009 / USDC settlement signing (eth_account / secp256k1).
+crypto = ["eth-account>=0.11"]
+# The repo-root demo agent (Nebius Token Factory / Nemotron). Not packaged.
+demo = ["openai>=1.30"]
+dev = ["pytest>=7.0", "ruff>=0.1.0", "build>=1.2", "twine>=5.0"]
+all = ["requests>=2.31", "eth-account>=0.11"]
+
+[project.scripts]
+safety-guard = "safety_protocol.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/TheDub-lab/agentcover-sovereign"
+Repository = "https://github.com/TheDub-lab/agentcover-sovereign"
+Issues = "https://github.com/TheDub-lab/agentcover-sovereign/issues"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -31,3 +61,25 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+safety_protocol = ["data/*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+# Demo scripts (examples/ and the repo-root agent) predate this config and are
+# not part of the shipped package; they are excluded rather than rewritten.
+extend-exclude = ["examples", "sovereign_agent.py", "agent_capabilities.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501",   # line length is handled by the formatter, not the linter
+]

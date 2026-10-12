@@ -19,7 +19,6 @@ This is how the protocol lowers insurance cost and makes claims processable.
 """
 
 from __future__ import annotations
-from typing import Any
 
 
 class InsuranceInterface:

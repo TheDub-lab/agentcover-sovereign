@@ -3,16 +3,16 @@ Core types and data structures for the safety protocol framework.
 """
 
 from __future__ import annotations
-import time
-import re
-import uuid
-import enum
-import json
-import hashlib
-from dataclasses import dataclass, field
-from typing import Any
-from datetime import datetime, timezone
 
+import contextlib
+import enum
+import hashlib
+import json
+import re
+import time
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
 # Core types
@@ -391,10 +391,9 @@ class Monitor:
 
         for alert in alerts:
             for cb in self.alert_callbacks:
-                try:
+                # don't let alert failures break the protocol
+                with contextlib.suppress(Exception):
                     cb(alert)
-                except Exception:
-                    pass  # don't let alert failures break the protocol
 
     def get_status(self) -> dict:
         """Get current monitor status."""

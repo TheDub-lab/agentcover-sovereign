@@ -22,14 +22,11 @@ This reference deployment demonstrates the architecture and the integration poin
 """
 
 from __future__ import annotations
-from safety_protocol import (
-    SafetyProtocol,
-    BoundAgent,
-    ScopeRule,
-)
-from .onchain import OnChainBindingRegistry, OnChainBoundProtocol
-from .onchain_audit import OnChainAudit, DualAudit
+
+from .core import ActionRequest
 from .insurance import InsuranceInterface
+from .onchain import OnChainBindingRegistry, OnChainBoundProtocol
+from .onchain_audit import DualAudit, OnChainAudit
 
 
 class ReferenceDeployment:
@@ -153,8 +150,7 @@ class ReferenceDeployment:
         is recorded off-chain (complete). Key events are also recorded on-chain
         (verifiable).
         """
-        # Access the protocol's internal audit and monitor
-        protocol_audit = self.protocol.protocol.audit
+        # Access the protocol's internal monitor
         protocol_monitor = self.protocol.protocol.monitor
 
         # Override the monitor's record_action to also record on-chain for key events
@@ -386,7 +382,3 @@ class ReferenceDeployment:
     def get_full_audit(self) -> dict:
         """Get the complete audit trail (off-chain + on-chain)."""
         return self.dual_audit.get_claims_evidence(self.agent_id)
-
-
-# Import for the wrapped_record_action
-from .core import ActionRequest, ActionResult

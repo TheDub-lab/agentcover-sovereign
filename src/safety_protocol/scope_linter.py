@@ -23,9 +23,10 @@ Usage:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+
+from collections.abc import Iterable
+from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable
 
 from .core import ScopeRule
 
@@ -117,9 +118,9 @@ def lint_rules(
             if rule.allowed_targets is not None and rule.methods is None:
                 findings.append(Finding(
                     Severity.WARN, "NO_METHOD",
-                    f"rule allows the action regardless of HTTP/transport verb. "
-                    f"A read rule that also permits DELETE is not least-privilege. "
-                    f"Bind `methods=[...]`.",
+                    "rule allows the action regardless of HTTP/transport verb. "
+                    "A read rule that also permits DELETE is not least-privilege. "
+                    "Bind `methods=[...]`.",
                     rule_index=i, action_type=at,
                 ))
 
@@ -127,9 +128,9 @@ def lint_rules(
             if rule.allowed_targets is not None and rule.param_schema is None:
                 findings.append(Finding(
                     Severity.WARN, "NO_PARAM_SCHEMA",
-                    f"rule allows the target for ANY params. Params are how a "
-                    f"'safe' endpoint does unsafe things (?confirm=true). Bind "
-                    f"`param_schema` (required keys, enums, ranges).",
+                    "rule allows the target for ANY params. Params are how a "
+                    "'safe' endpoint does unsafe things (?confirm=true). Bind "
+                    "`param_schema` (required keys, enums, ranges).",
                     rule_index=i, action_type=at,
                 ))
 
@@ -137,8 +138,8 @@ def lint_rules(
             if rule.max_cost is None and at in ("spend", "payment", "api_call"):
                 findings.append(Finding(
                     Severity.WARN, "NO_PER_RULE_CAP",
-                    f"rule has no per-action max_cost. The global budget only "
-                    f"catches volume, not a single oversized action. Add `max_cost`.",
+                    "rule has no per-action max_cost. The global budget only "
+                    "catches volume, not a single oversized action. Add `max_cost`.",
                     rule_index=i, action_type=at,
                 ))
 
@@ -155,8 +156,8 @@ def lint_rules(
         if _contradiction(rule):
             findings.append(Finding(
                 Severity.ERROR, "ALLOW_FORBID_CONFLICT",
-                f"same token appears in both allowed_targets and "
-                f"forbidden_targets — the rule is self-contradictory.",
+                "same token appears in both allowed_targets and "
+                "forbidden_targets — the rule is self-contradictory.",
                 rule_index=i, action_type=at,
             ))
 
