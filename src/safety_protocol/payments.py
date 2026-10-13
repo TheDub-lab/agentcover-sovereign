@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Michael / TheDub-lab
 """
 Safe payment / spend agent — x402 guard.
 

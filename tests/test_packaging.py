@@ -1,6 +1,8 @@
 """Tests for the packaged ``safety_protocol`` installation surface."""
 from importlib.resources import files
 
+import pytest
+
 import safety_protocol
 
 
@@ -10,18 +12,25 @@ def test_version_is_set():
 
 
 def test_public_api_exports():
+    # The MIT SDK surface (the BSL platform layer is a separate install).
     for name in (
         "SafetyProtocol",
         "BoundAgent",
         "ScopeRule",
         "AuditTrail",
         "Monitor",
-        "GuardService",
-        "lint_rules",
-        "ReferenceDeployment",
         "SafeSpendAgent",
+        "lint_rules",
     ):
         assert hasattr(safety_protocol, name), name
+
+
+def test_platform_layer_imports_when_present():
+    pytest.importorskip("safety_protocol.platform")
+    from safety_protocol.platform import GuardService, ReferenceDeployment
+
+    assert GuardService is not None
+    assert ReferenceDeployment is not None
 
 
 def test_default_config_is_packaged():

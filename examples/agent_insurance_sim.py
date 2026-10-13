@@ -38,8 +38,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from safety_protocol.core import ActionRequest, ActionOutcome, ScopeRule
 from safety_protocol.protocol import SafetyProtocol
-from safety_protocol.onchain_audit import OnChainAudit, DualAudit
-from safety_protocol.insurance import InsuranceInterface
+from safety_protocol.platform.onchain_audit import OnChainAudit, DualAudit
+from safety_protocol.platform.insurance import InsuranceInterface
 
 
 # --------------------------------------------------------------------------

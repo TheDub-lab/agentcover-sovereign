@@ -1,13 +1,15 @@
 [project]
 name = "safety-protocol"
-version = "0.3.0"
+version = "0.4.0"
 description = "Safety protocol framework for LLM agents — binding, scope, enforcement, monitoring, approval, audit, killswitch"
 readme = "README.md"
+# The published wheel is the MIT SDK only. The BSL platform layer lives in
+# src/safety_protocol/platform/ and is excluded below; see LICENSING.md.
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
-    {name = "Michael", email = "michael@example.com"}
+    {name = "Michael", email = "thislife1made@gmail.com"}
 ]
 keywords = [
     "ai-agents",
@@ -61,6 +63,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+# The BSL platform layer is distributed separately; keep it out of the wheel.
+exclude = ["safety_protocol.platform", "safety_protocol.platform.*"]
 
 [tool.setuptools.package-data]
 safety_protocol = ["data/*.json"]

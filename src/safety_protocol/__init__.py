@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Michael / TheDub-lab
 """
 Safety Protocol Framework for LLM Agents
 
@@ -140,6 +142,7 @@ Documentation:
     - Example (LLM agent): examples/llm_agent.py
     - Example (reference deployment): examples/reference_deployment.py
 """
+from .config import build_protocol_from_config
 from .core import (
     ActionOutcome,
     ActionRequest,
@@ -150,16 +153,29 @@ from .core import (
     ProtocolState,
     ScopeRule,
 )
-from .deployment import ReferenceDeployment
-from .guard_service import GuardService, build_protocol_from_config
-from .insurance import InsuranceInterface
-from .onchain import OnChainBindingRegistry, OnChainBoundProtocol
-from .onchain_audit import DualAudit, OnChainAudit
 from .onchain_payment_verifier import OnChainPaymentVerifier
 from .payments import PaymentEnvelope, SafeSpendAgent, SimWallet
 from .protocol import BoundAgent, SafetyProtocol
 from .real_wallet import HAS_REAL_CRYPTO, RealWallet
 from .scope_linter import Finding, Severity, lint_report, lint_rules
+
+# BSL platform layer: the hosted service + on-chain audit / insurance evidence
+# stack. Shipped separately from the MIT wheel, so it is optional at import
+# time — the MIT SDK works on its own.
+try:
+    from .platform.deployment import ReferenceDeployment
+    from .platform.guard_service import GuardService
+    from .platform.insurance import InsuranceInterface
+    from .platform.onchain import OnChainBindingRegistry, OnChainBoundProtocol
+    from .platform.onchain_audit import DualAudit, OnChainAudit
+except ImportError:  # pragma: no cover - MIT-only installs
+    ReferenceDeployment = None  # type: ignore
+    GuardService = None  # type: ignore
+    InsuranceInterface = None  # type: ignore
+    OnChainBindingRegistry = None  # type: ignore
+    OnChainBoundProtocol = None  # type: ignore
+    DualAudit = None  # type: ignore
+    OnChainAudit = None  # type: ignore
 
 try:
     from importlib.metadata import PackageNotFoundError
@@ -167,7 +183,7 @@ try:
 
     __version__ = _version("safety-protocol")
 except PackageNotFoundError:  # running from a source checkout
-    __version__ = "0.3.0"
+    __version__ = "0.4.0"
 __all__ = [
     "ActionOutcome",
     "ProtocolState",

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Michael / TheDub-lab
 """
 Scope rule linter — catch broad rules BEFORE they ship.
 

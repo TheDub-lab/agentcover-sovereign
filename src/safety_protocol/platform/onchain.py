@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright (c) 2026 Michael / TheDub-lab
 """
 On-chain binding for agent identity.
 
@@ -191,7 +193,7 @@ class OnChainBoundProtocol:
         approval_threshold_cost=10.0,
         allowed_action_types=None,
     ):
-        from .protocol import SafetyProtocol
+        from ..protocol import SafetyProtocol
 
         self.agent_id = agent_id
         self.user_id = user_id

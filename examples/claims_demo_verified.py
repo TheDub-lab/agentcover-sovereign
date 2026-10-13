@@ -12,7 +12,7 @@ pending outcomes. This script demonstrates the gate decisions and their evidence
 """
 
 from safety_protocol import ScopeRule
-from safety_protocol.deployment import ReferenceDeployment
+from safety_protocol.platform.deployment import ReferenceDeployment
 from safety_protocol.scope_linter import lint_rules, Severity
 
 

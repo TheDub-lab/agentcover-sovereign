@@ -1,4 +1,6 @@
 include LICENSE
+include LICENSE-BSL
+include LICENSING.md
 include README.md
 include pyproject.toml
 
@@ -9,7 +11,8 @@ recursive-include src/safety_protocol/data *.json
 recursive-include examples *.py *.json
 
 # Keep the source distribution lean: no marketing/promo assets, no root demo,
-# no local state or build cruft.
+# no local state or build cruft. The BSL platform layer is distributed
+# separately and is not part of the published package.
 exclude carrier_deck.html
 exclude examples/loss_curve.png
 exclude examples/loss_curve.svg
@@ -17,6 +20,7 @@ exclude sovereign_agent.py
 exclude agent_capabilities.py
 exclude agent_memory.json
 exclude testnet_wallets.json
+prune src/safety_protocol/platform
 prune src/safety_protocol/__pycache__
 prune src/safety_protocol.egg-info
 global-exclude __pycache__

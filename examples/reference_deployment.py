@@ -12,7 +12,7 @@ Demonstrates all four layers operating together:
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from safety_protocol.deployment import ReferenceDeployment
+from safety_protocol.platform.deployment import ReferenceDeployment
 from safety_protocol import ScopeRule
 
 

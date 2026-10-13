@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Michael / TheDub-lab
 """
 ``safety-guard`` — the CLI developers use to run and lint the guard.
 
@@ -28,9 +30,10 @@ import json
 import sys
 from importlib.resources import files
 
-from safety_protocol.guard_service import GuardService
-from safety_protocol.guard_service import serve as serve_http
-from safety_protocol.scope_linter import Severity
+from safety_protocol.config import build_protocol_from_config
+from safety_protocol.core import ActionOutcome, ActionRequest
+from safety_protocol.payments import SafeSpendAgent, SimWallet
+from safety_protocol.scope_linter import Severity, lint_report
 
 
 def load_cfg(path):
@@ -52,31 +55,60 @@ def cmd_init(args):
 
 
 def cmd_serve(args):
-    # Delegate to the HTTP server entry (fails closed on lint via GuardService).
+    # The HTTP guard service is part of the BSL platform layer, which is not
+    # shipped in the MIT wheel. Import lazily so the free CLI works without it.
+    try:
+        from safety_protocol.platform.guard_service import serve as serve_http
+    except ImportError:
+        print(
+            "safety-guard serve requires the platform layer (BUSL 1.1), which "
+            "is not part of the MIT wheel.\nInstall the platform layer from "
+            "the repo, or use a commercial license.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     serve_http(args.config, args.host, args.port)
 
 
 def cmd_check(args):
-    svc = GuardService(load_cfg(args.config))
+    protocol, _ = build_protocol_from_config(load_cfg(args.config))
     params = json.loads(args.params) if args.params else {}
-    r = svc.guard(args.action, args.target, method=args.method,
-                  params=params, cost=args.cost)
-    print(json.dumps(r, indent=2))
-    sys.exit(0 if r["allowed"] else 1)
+    res = protocol.execute(ActionRequest(
+        action_type=args.action,
+        target=args.target,
+        method=args.method,
+        estimated_cost=args.cost,
+        params=params,
+    ))
+    out = {
+        "outcome": res.outcome.value,
+        "allowed": res.outcome == ActionOutcome.ALLOWED,
+        "block_reason": res.block_reason,
+        "requires_approval_for": res.requires_approval_for,
+        "request_id": res.request_id,
+    }
+    print(json.dumps(out, indent=2))
+    sys.exit(0 if out["allowed"] else 1)
 
 
 def cmd_pay(args):
-    svc = GuardService(load_cfg(args.config))
-    r = svc.pay(args.recipient, args.usd, resource=args.resource)
-    print(json.dumps(r, indent=2))
-    sys.exit(0 if r["allowed"] else 1)
+    protocol, _ = build_protocol_from_config(load_cfg(args.config))
+    agent = SafeSpendAgent(protocol=protocol, wallet=SimWallet())
+    r = agent.direct_pay(args.recipient, args.usd, resource=args.resource)
+    out = {
+        "outcome": r.outcome,
+        "allowed": r.outcome in ("paid", "pending_approval"),
+        "block_reason": r.reason,
+        "approval_token": r.approval_token,
+        "signed": bool(r.envelope),
+    }
+    print(json.dumps(out, indent=2))
+    sys.exit(0 if out["allowed"] else 1)
 
 
 def cmd_lint(args):
     cfg = load_cfg(args.config)
     # Rebuild via the same path the guard uses, so lint + fail-closed match.
-    from safety_protocol.guard_service import build_protocol_from_config
-    from safety_protocol.scope_linter import lint_report
     try:
         _, findings = build_protocol_from_config(cfg)
     except SystemExit as e:

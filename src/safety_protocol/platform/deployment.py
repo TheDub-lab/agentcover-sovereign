@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright (c) 2026 Michael / TheDub-lab
 """
 Reference Deployment: Full Safety Protocol Architecture.
 
@@ -23,7 +25,7 @@ This reference deployment demonstrates the architecture and the integration poin
 
 from __future__ import annotations
 
-from .core import ActionRequest
+from ..core import ActionRequest
 from .insurance import InsuranceInterface
 from .onchain import OnChainBindingRegistry, OnChainBoundProtocol
 from .onchain_audit import DualAudit, OnChainAudit

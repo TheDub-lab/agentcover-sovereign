@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright (c) 2026 Michael / TheDub-lab
 """
 On-chain audit trail for key events.
 

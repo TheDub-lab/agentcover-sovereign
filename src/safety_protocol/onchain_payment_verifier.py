@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Michael / TheDub-lab
 """
 On-chain USDC payment verification — the safety-protocol's post-settlement
 confirmation primitive for the x402 guard.

@@ -1,5 +1,9 @@
-from safety_protocol.insurance import InsuranceInterface
-from safety_protocol.onchain_audit import DualAudit, OnChainAudit
+import pytest
+
+pytest.importorskip("safety_protocol.platform")
+
+from safety_protocol.platform.insurance import InsuranceInterface
+from safety_protocol.platform.onchain_audit import DualAudit, OnChainAudit
 
 
 def make_insurance():

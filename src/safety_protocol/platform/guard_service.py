@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright (c) 2026 Michael / TheDub-lab
 """
 Guard service — the surface a REAL agent calls.
 
@@ -31,67 +33,10 @@ import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .core import (
-    ActionOutcome,
-    ActionRequest,
-    AuditTrail,
-    ScopeRule,
-)
-from .payments import SafeSpendAgent, SimWallet
-from .protocol import SafetyProtocol
-from .scope_linter import Severity, lint_report, lint_rules
-
-
-# ---------------------------------------------------------------------------
-# Config: user-controlled, linted on load (fail-closed)
-# ---------------------------------------------------------------------------
-def load_rules(cfg: dict) -> list[ScopeRule]:
-    raw = cfg.get("scope_rules", [])
-    rules = []
-    for r in raw:
-        rules.append(ScopeRule(
-            action_type=r.get("action_type"),
-            allowed_targets=r.get("allowed_targets"),
-            forbidden_targets=r.get("forbidden_targets"),
-            match=r.get("match", "exact"),
-            forbid_match=r.get("forbid_match", "token"),
-            methods=r.get("methods"),
-            param_schema=r.get("param_schema"),
-            max_cost=r.get("max_cost"),
-            requires_approval=bool(r.get("requires_approval", False)),
-            allow_subactions=bool(r.get("allow_subactions", True)),
-        ))
-    return rules
-
-
-def build_protocol_from_config(cfg: dict) -> tuple[SafetyProtocol, list]:
-    """Build the protocol from a user config. LINTS first, fails closed.
-
-    Returns (protocol, findings). Raises SystemExit if the config is too
-    broad to ship — the guard must not start with dangerous rules.
-    """
-    vocab = cfg.get("allowed_action_types", [])
-    rules = load_rules(cfg)
-    findings = lint_rules(rules, vocab)
-    blocking = [f for f in findings
-                if f.severity in (Severity.ERROR, Severity.WARN)]
-    if blocking:
-        # Fail closed: refuse to run with a broad/self-contradictory ruleset.
-        raise SystemExit(
-            "REFUSING TO START — scope rules failed lint:\n"
-            + lint_report(findings)
-        )
-    audit = AuditTrail()
-    protocol = SafetyProtocol(
-        agent_id=cfg.get("agent_id", "guard-agent"),
-        user_id=cfg.get("user_id", "user"),
-        scope_rules=rules,
-        budget_limit=cfg.get("budget_limit"),
-        approval_threshold_cost=cfg.get("approval_threshold_cost", 10.0),
-        audit=audit,
-        allowed_action_types=vocab,
-    )
-    return protocol, findings
+from ..config import build_protocol_from_config
+from ..core import ActionOutcome, ActionRequest
+from ..payments import SafeSpendAgent, SimWallet
+from ..scope_linter import Severity, lint_report
 
 
 # ---------------------------------------------------------------------------

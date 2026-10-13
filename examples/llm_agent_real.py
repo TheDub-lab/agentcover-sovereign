@@ -42,8 +42,8 @@ from safety_protocol import (
     ActionOutcome,
     ActionRequest,
 )
-from safety_protocol.onchain_audit import OnChainAudit, DualAudit
-from safety_protocol.insurance import InsuranceInterface
+from safety_protocol.platform.onchain_audit import OnChainAudit, DualAudit
+from safety_protocol.platform.insurance import InsuranceInterface
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "llama3.2"

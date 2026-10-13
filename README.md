@@ -3,7 +3,8 @@
 [![CI](https://github.com/TheDub-lab/agentcover-sovereign/actions/workflows/ci.yml/badge.svg)](https://github.com/TheDub-lab/agentcover-sovereign/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/safety-protocol.svg)](https://pypi.org/project/safety-protocol/)
 [![Python](https://img.shields.io/pypi/pyversions/safety-protocol.svg)](https://pypi.org/project/safety-protocol/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/SDK%20license-MIT-yellow.svg)](LICENSE)
+[![License: BSL 1.1](https://img.shields.io/badge/platform%20license-BSL%201.1-blue.svg)](LICENSE-BSL)
 
 Enforceable governance for LLM agents. Instead of hoping the model behaves,
 every action passes through infrastructure that enforces **binding, closed
@@ -176,4 +177,8 @@ AI), then hardened into a general enforcement library.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+Open core. The enforcement SDK is **MIT** (see [`LICENSE`](LICENSE)); the
+hostable service + on-chain audit/evidence platform layer
+(`src/safety_protocol/platform/`) is **Business Source License 1.1**
+(see [`LICENSE-BSL`](LICENSE-BSL)). The PyPI wheel ships the MIT SDK only.
+Full details in [`LICENSING.md`](LICENSING.md).
