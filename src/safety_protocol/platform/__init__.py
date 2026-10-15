@@ -22,6 +22,7 @@ from .guard_service import GuardService
 from .insurance import InsuranceInterface
 from .onchain import OnChainBindingRegistry, OnChainBoundProtocol
 from .onchain_audit import DualAudit, OnChainAudit
+from .receiver import Receiver, Store, verify_receipt
 
 __all__ = [
     "GuardService",
@@ -32,4 +33,7 @@ __all__ = [
     "OnChainBoundProtocol",
     "OnChainAudit",
     "DualAudit",
+    "Receiver",
+    "Store",
+    "verify_receipt",
 ]

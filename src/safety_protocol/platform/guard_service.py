@@ -37,6 +37,7 @@ from ..config import build_protocol_from_config
 from ..core import ActionOutcome, ActionRequest
 from ..payments import SafeSpendAgent, SimWallet
 from ..scope_linter import Severity, lint_report
+from ..shipping import shipper_from_config
 
 
 # ---------------------------------------------------------------------------
@@ -45,13 +46,25 @@ from ..scope_linter import Severity, lint_report
 class GuardService:
     """Wraps SafetyProtocol (+ optional SafeSpendAgent) behind a clean API."""
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, start_shipper: bool = True):
         self.cfg = cfg
         self.protocol, self.findings = build_protocol_from_config(cfg)
         self.agent = None
         if "payment" in (self.protocol.allowed_action_types or []):
             self.agent = SafeSpendAgent(
                 protocol=self.protocol, wallet=SimWallet())
+
+        # Log shipping: if configured, every decision is streamed to an
+        # external receiver in the background (never blocks an action).
+        self.shipper = shipper_from_config(cfg)
+        if self.shipper is not None:
+            self.protocol.add_decision_sink(self.shipper.emit)
+            if start_shipper:
+                self.shipper.start()
+
+    def close(self):
+        if self.shipper is not None:
+            self.shipper.stop()
 
     # -- the core gate (what every agent call funnels through) ----------
     def guard(self, action_type: str, target: str, method: str | None = None,
@@ -95,16 +108,26 @@ class GuardService:
         return self.protocol.audit.get_full_history(
             self.cfg.get("agent_id", "guard-agent"))
 
+    def receipts(self) -> dict:
+        if self.shipper is None:
+            return {"enabled": False}
+        r = self.shipper.outbox.latest_receipt()
+        return {"enabled": True, "latest_receipt": r, "shipping": self.shipper.status()}
+
     def health(self) -> dict:
         m = self.protocol.monitor.get_status()
-        return {
+        out = {
             "agent_id": self.cfg.get("agent_id", "guard-agent"),
             "user_id": self.protocol.user_id,
             "state": self.protocol._state.value,
+            "mode": self.protocol.mode,
             "lint": lint_report(self.findings),
             "monitor": m,
             "allowed_action_types": self.protocol.allowed_action_types,
         }
+        out["shipping"] = (
+            self.shipper.status() if self.shipper is not None else {"enabled": False})
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +158,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, self.service.health())
         if self.path == "/audit":
             return self._send(200, {"events": self.service.audit()})
+        if self.path == "/receipts":
+            return self._send(200, self.service.receipts())
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -171,6 +196,8 @@ def serve(cfg_path: str, host: str = "127.0.0.1", port: int = 8080):
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n[guard] stopped")
+    finally:
+        svc.close()
 
 
 def main():

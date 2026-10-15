@@ -34,6 +34,7 @@ def load_rules(cfg: dict) -> list[ScopeRule]:
             max_cost=r.get("max_cost"),
             requires_approval=bool(r.get("requires_approval", False)),
             allow_subactions=bool(r.get("allow_subactions", True)),
+            rule_id=r.get("id"),
         ))
     return rules
 
@@ -64,5 +65,6 @@ def build_protocol_from_config(cfg: dict) -> tuple[SafetyProtocol, list]:
         approval_threshold_cost=cfg.get("approval_threshold_cost", 10.0),
         audit=audit,
         allowed_action_types=vocab,
+        mode=cfg.get("mode", "enforce"),
     )
     return protocol, findings

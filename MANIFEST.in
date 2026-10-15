@@ -10,6 +10,9 @@ recursive-include src/safety_protocol/data *.json
 # Worked examples (developer-facing), not marketing assets
 recursive-include examples *.py *.json
 
+# Documentation
+recursive-include docs *.md
+
 # Keep the source distribution lean: no marketing/promo assets, no root demo,
 # no local state or build cruft. The BSL platform layer is distributed
 # separately and is not part of the published package.

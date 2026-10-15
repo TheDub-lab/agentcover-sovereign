@@ -17,6 +17,7 @@ Every action the agent takes is attributable to the user.
 
 from __future__ import annotations
 
+import contextlib
 import time
 import uuid
 
@@ -55,6 +56,8 @@ class SafetyProtocol:
         audit: AuditTrail | None = None,
         monitor: Monitor | None = None,
         allowed_action_types: list[str] | None = None,
+        mode: str = "enforce",
+        decision_sinks: list | None = None,
     ):
         """
         Args:
@@ -82,6 +85,21 @@ class SafetyProtocol:
         self._state = ProtocolState.ACTIVE
         self._spent = 0.0
         self._pending_approvals: dict[str, ActionRequest] = {}
+
+        # "enforce" (default) blocks per policy. "shadow" logs what the
+        # policy WOULD have done (policy_decision) but returns allowed for
+        # everything policy denied — a safe rollout mode. The kill switch
+        # and a revoked binding still block in shadow mode.
+        if mode not in ("enforce", "shadow"):
+            raise ValueError(f"mode must be 'enforce' or 'shadow', got {mode!r}")
+        self.mode = mode
+
+        # Decision sinks: callables notified (request, result, decision) after
+        # every decision. Used to ship audit entries to an external receiver.
+        # Sink failures are swallowed — logging must never break enforcement.
+        self.decision_sinks: list = list(decision_sinks or [])
+        # Best-effort id of the scope rule that produced the last decision.
+        self._matched_rule_id: str | None = None
         # Approved intents: (target, cost-cents) -> expiry ts. When a human
         # approves an action, the matching retry is allowed for a short window
         # so the agent can actually proceed after sign-off. Per-intent, not
@@ -106,6 +124,25 @@ class SafetyProtocol:
             "approval_threshold": approval_threshold_cost,
             "allowed_action_types": self.allowed_action_types,
         })
+
+    # ------------------------------------------------------------------
+    # Decision sinks (log shipping)
+    # ------------------------------------------------------------------
+
+    def add_decision_sink(self, sink) -> None:
+        """Register a callable notified as ``sink(request, result, decision)``
+        after every decision. ``decision`` is an override string for approval
+        outcomes (``"approved"`` / ``"rejected"``), else ``None`` so the sink
+        derives it from the result. Sink errors are swallowed.
+        """
+        self.decision_sinks.append(sink)
+
+    def _announce(self, request, result, decision=None) -> None:
+        result.execution_log.setdefault("rule_id", self._matched_rule_id)
+        sink_decision = decision
+        for sink in self.decision_sinks:
+            with contextlib.suppress(Exception):
+                sink(request, result, sink_decision)
 
     # ------------------------------------------------------------------
     # Binding
@@ -146,6 +183,14 @@ class SafetyProtocol:
         })
         self.monitor.action_count += 1
         self.monitor.blocked_count += 1
+        # Ship the kill-switch event itself (it never flows through execute()).
+        req = ActionRequest(
+            action_type="killswitch", target="SYSTEM", urgency="critical")
+        res = ActionResult(
+            req.request_id, ActionOutcome.BLOCKED_KILLSWITCH,
+            block_reason=reason)
+        res.execution_log["policy_outcome"] = ActionOutcome.BLOCKED_KILLSWITCH.value
+        self._announce(req, res, decision="killswitch")
 
     def disengage_killswitch(self):
         """Unfreeze. Does NOT restore revoked binding."""
@@ -178,6 +223,9 @@ class SafetyProtocol:
         3. No rule explicitly permitted it → block. Scope is an allowlist,
            not a hope. The default outcome is DENY.
         """
+        # Best-effort: record the rule that produced this decision (for logs).
+        self._matched_rule_id = None
+
         # 1. Closed verb vocabulary (deny-by-default at the verb level)
         if (self.allowed_action_types
                 and request.action_type not in self.allowed_action_types):
@@ -200,6 +248,7 @@ class SafetyProtocol:
             if rule.forbidden_targets:
                 for pattern in rule.forbidden_targets:
                     if target_matches(pattern, request.target, rule.forbid_match):
+                        self._matched_rule_id = rule.rule_id
                         return (
                             f"Target '{request.target}' matches forbidden "
                             f"pattern '{pattern}' ({rule.forbid_match})"
@@ -233,6 +282,7 @@ class SafetyProtocol:
                     if rule.max_cost is not None:
                         per_rule_caps.append(rule.max_cost)
                     permitted = True
+                    self._matched_rule_id = rule.rule_id
                 # If this rule carries an allowlist and the target hit none,
                 # the rule does NOT permit it. We don't deny here because a
                 # later rule could permit it — but if NO rule permits it,
@@ -257,6 +307,7 @@ class SafetyProtocol:
             if rule.max_cost is not None:
                 per_rule_caps.append(rule.max_cost)
             permitted = True
+            self._matched_rule_id = rule.rule_id
 
         if not permitted:
             return (
@@ -366,6 +417,7 @@ class SafetyProtocol:
             key = (request.target, int(round(request.estimated_cost * 100)))
             self._approved_intents[key] = time.time() + 300  # 5-minute window
 
+        self._announce(request, result, decision="approved" if approved else "rejected")
         return approved
 
     def get_pending_approvals(self) -> list[dict]:
@@ -383,6 +435,71 @@ class SafetyProtocol:
     # The main gate — single entry point for all agent actions
     # ------------------------------------------------------------------
 
+    def _evaluate(self, request: ActionRequest) -> ActionResult:
+        """Pure policy evaluation — what SHOULD happen, before shadow mode.
+
+        Order:
+        1. Binding check — is the agent still authorized?
+        2. Kill switch check — is the protocol frozen?
+        3. Scope check — is this action within allowed scope?
+        4. Budget check — will this exceed the budget?
+        5. Approval gate — does this need human sign-off?
+        6. Allow.
+        """
+        # 1. Binding check
+        if not self.verify_binding():
+            return ActionResult(
+                request.request_id,
+                ActionOutcome.BLOCKED_SCOPE,
+                block_reason="Agent binding revoked — no actions permitted",
+            )
+
+        # 2. Kill switch check
+        if self._state == ProtocolState.FROZEN:
+            return ActionResult(
+                request.request_id,
+                ActionOutcome.BLOCKED_KILLSWITCH,
+                block_reason="Protocol frozen by kill switch — all actions blocked",
+            )
+
+        # 3. Scope check
+        scope_violation = self._check_scope(request)
+        if scope_violation:
+            return ActionResult(
+                request.request_id,
+                ActionOutcome.BLOCKED_SCOPE,
+                block_reason=scope_violation,
+            )
+
+        # 4. Budget check
+        budget_violation = self._check_budget(request)
+        if budget_violation:
+            return ActionResult(
+                request.request_id,
+                ActionOutcome.BLOCKED_BUDGET,
+                block_reason=budget_violation,
+            )
+
+        # 5. Approval gate
+        if self._needs_approval(request):
+            # If a human already approved this exact intent recently, honor it.
+            key = (request.target, int(round(request.estimated_cost * 100)))
+            expiry = self._approved_intents.get(key)
+            if not (expiry and time.time() < expiry):
+                # In shadow mode we do not create a real pending approval; the
+                # policy outcome is still "needs_approval" and gets logged.
+                token = None
+                if self.mode != "shadow":
+                    token = self.request_approval(request)
+                return ActionResult(
+                    request.request_id,
+                    ActionOutcome.PENDING_APPROVAL,
+                    requires_approval_for=token,
+                )
+
+        # 6. All checks passed.
+        return ActionResult(request.request_id, ActionOutcome.ALLOWED, executed=True)
+
     def execute(self, request: ActionRequest) -> ActionResult:
         """
         The single entry point for all agent actions.
@@ -390,88 +507,52 @@ class SafetyProtocol:
         This is the enforcement layer. The agent calls this. The protocol
         decides. Nothing bypasses this.
 
-        Execution order:
-        1. Binding check — is the agent still authorized?
-        2. Kill switch check — is the protocol frozen?
-        3. Scope check — is this action within allowed scope?
-        4. Budget check — will this exceed the budget?
-        5. Approval gate — does this need human sign-off?
-        6. Allow and execute — all checks passed.
+        Runs the policy (``_evaluate``), applies the mode, records the
+        outcome once, and notifies any decision sinks (log shipping).
         """
-        # 1. Binding check
-        if not self.verify_binding():
-            result = ActionResult(
-                request.request_id,
+        policy = self._evaluate(request)
+        policy_value = policy.outcome.value
+        result = policy
+
+        shadowed = (
+            self.mode == "shadow"
+            and policy.outcome in (
                 ActionOutcome.BLOCKED_SCOPE,
-                block_reason="Agent binding revoked — no actions permitted",
-            )
-            self.monitor.record_action(result, request)
-            return result
-
-        # 2. Kill switch check
-        if self._state == ProtocolState.FROZEN:
-            result = ActionResult(
-                request.request_id,
-                ActionOutcome.BLOCKED_KILLSWITCH,
-                block_reason="Protocol frozen by kill switch — all actions blocked",
-            )
-            self.monitor.record_action(result, request)
-            return result
-
-        # 3. Scope check
-        scope_violation = self._check_scope(request)
-        if scope_violation:
-            result = ActionResult(
-                request.request_id,
-                ActionOutcome.BLOCKED_SCOPE,
-                block_reason=scope_violation,
-            )
-            self.monitor.record_action(result, request)
-            return result
-
-        # 4. Budget check
-        budget_violation = self._check_budget(request)
-        if budget_violation:
-            result = ActionResult(
-                request.request_id,
                 ActionOutcome.BLOCKED_BUDGET,
-                block_reason=budget_violation,
+                ActionOutcome.PENDING_APPROVAL,
             )
-            self.monitor.record_action(result, request)
-            return result
+        )
+        if shadowed:
+            # Shadow mode: log what policy said, but allow the action through.
+            result = ActionResult(
+                request.request_id,
+                ActionOutcome.ALLOWED,
+                executed=True,
+                execution_log={
+                    "shadow": True,
+                    "policy_outcome": policy_value,
+                    "policy_reason": policy.block_reason,
+                },
+            )
 
-        # 5. Approval gate
-        if self._needs_approval(request):
-            # If a human already approved this exact intent recently, honor it.
-            key = (request.target, int(round(request.estimated_cost * 100)))
-            expiry = self._approved_intents.get(key)
-            if expiry and time.time() < expiry:
-                # Approved — fall through to execute.
-                pass
-            else:
-                token = self.request_approval(request)
-                result = ActionResult(
-                    request.request_id,
-                    ActionOutcome.PENDING_APPROVAL,
-                    requires_approval_for=token,
-                )
-                self.monitor.record_action(result, request)
-                return result
+        result.execution_log.setdefault("policy_outcome", policy_value)
 
-        # 6. All checks passed — ALLOW and execute
-        self._spent += request.estimated_cost
-        result = ActionResult(request.request_id, ActionOutcome.ALLOWED, executed=True)
+        if result.outcome == ActionOutcome.ALLOWED and result.executed:
+            self._spent += request.estimated_cost
 
         self.monitor.record_action(result, request)
-        self.audit.append("action_executed", self.agent_id, {
-            "request_id": request.request_id,
-            "action_type": request.action_type,
-            "target": request.target,
-            "params": request.params,
-            "cost": request.estimated_cost,
-            "urgency": request.urgency,
-        })
 
+        if result.outcome == ActionOutcome.ALLOWED and result.executed:
+            self.audit.append("action_executed", self.agent_id, {
+                "request_id": request.request_id,
+                "action_type": request.action_type,
+                "target": request.target,
+                "params": request.params,
+                "cost": request.estimated_cost,
+                "urgency": request.urgency,
+            })
+
+        self._announce(request, result)
         return result
 
 

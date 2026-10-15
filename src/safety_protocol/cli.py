@@ -34,11 +34,30 @@ from safety_protocol.config import build_protocol_from_config
 from safety_protocol.core import ActionOutcome, ActionRequest
 from safety_protocol.payments import SafeSpendAgent, SimWallet
 from safety_protocol.scope_linter import Severity, lint_report
+from safety_protocol.shipping import shipper_from_config
 
 
 def load_cfg(path):
     with open(path) as f:
         return json.load(f)
+
+
+def _attach_shipper(cfg, protocol, ship):
+    """Attach a log shipper for a one-shot CLI decision, if requested.
+
+    Shipping happens for a one-shot command only when the config has a
+    ``shipping`` block AND ``--ship`` is passed. The decision is emitted and
+    flushed once (blocking) so a receipt comes back synchronously.
+    """
+    if not ship:
+        return None
+    shipper = shipper_from_config(cfg)
+    if shipper is None:
+        print("warning: --ship given but config has no 'shipping' block",
+              file=sys.stderr)
+        return None
+    protocol.add_decision_sink(shipper.emit)
+    return shipper
 
 
 def cmd_init(args):
@@ -71,7 +90,9 @@ def cmd_serve(args):
 
 
 def cmd_check(args):
-    protocol, _ = build_protocol_from_config(load_cfg(args.config))
+    cfg = load_cfg(args.config)
+    protocol, _ = build_protocol_from_config(cfg)
+    shipper = _attach_shipper(cfg, protocol, args.ship)
     params = json.loads(args.params) if args.params else {}
     res = protocol.execute(ActionRequest(
         action_type=args.action,
@@ -87,12 +108,18 @@ def cmd_check(args):
         "requires_approval_for": res.requires_approval_for,
         "request_id": res.request_id,
     }
+    if shipper is not None:
+        receipt = shipper.flush_once()
+        out["shipped"] = receipt is not None
+        out["receipt"] = receipt
     print(json.dumps(out, indent=2))
     sys.exit(0 if out["allowed"] else 1)
 
 
 def cmd_pay(args):
-    protocol, _ = build_protocol_from_config(load_cfg(args.config))
+    cfg = load_cfg(args.config)
+    protocol, _ = build_protocol_from_config(cfg)
+    shipper = _attach_shipper(cfg, protocol, args.ship)
     agent = SafeSpendAgent(protocol=protocol, wallet=SimWallet())
     r = agent.direct_pay(args.recipient, args.usd, resource=args.resource)
     out = {
@@ -102,6 +129,10 @@ def cmd_pay(args):
         "approval_token": r.approval_token,
         "signed": bool(r.envelope),
     }
+    if shipper is not None:
+        receipt = shipper.flush_once()
+        out["shipped"] = receipt is not None
+        out["receipt"] = receipt
     print(json.dumps(out, indent=2))
     sys.exit(0 if out["allowed"] else 1)
 
@@ -143,6 +174,8 @@ def main(argv=None):
     c.add_argument("--method")
     c.add_argument("--params", default="")
     c.add_argument("--cost", type=float, default=0.0)
+    c.add_argument("--ship", action="store_true",
+                   help="ship this decision to the configured receiver")
     c.set_defaults(func=cmd_check)
 
     p = sub.add_parser("pay", help="request a gated payment")
@@ -150,6 +183,8 @@ def main(argv=None):
     p.add_argument("--recipient", required=True)
     p.add_argument("--usd", type=float, required=True)
     p.add_argument("--resource", default="weather")
+    p.add_argument("--ship", action="store_true",
+                   help="ship this decision to the configured receiver")
     p.set_defaults(func=cmd_pay)
 
     lint_p = sub.add_parser("lint", help="lint the config ruleset")

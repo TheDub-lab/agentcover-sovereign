@@ -3,7 +3,17 @@
   "user_id": "alice",
   "budget_limit": 20.0,
   "approval_threshold_cost": 2.0,
+  "mode": "enforce",
   "allowed_action_types": ["api_call", "send_message", "payment"],
+  "shipping": {
+    "receiver_url": "http://127.0.0.1:8787",
+    "api_key": "REPLACE_WITH_AGENT_API_KEY",
+    "batch_size": 50,
+    "flush_interval_s": 5,
+    "heartbeat_interval_s": 60,
+    "log_params": "none",
+    "outbox_dir": ".safety_outbox/research-agent-01"
+  },
   "scope_rules": [
     {
       "action_type": "api_call",

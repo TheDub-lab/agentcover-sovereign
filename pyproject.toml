@@ -1,6 +1,6 @@
 [project]
 name = "safety-protocol"
-version = "0.4.0"
+version = "0.5.0"
 description = "Safety protocol framework for LLM agents — binding, scope, enforcement, monitoring, approval, audit, killswitch"
 readme = "README.md"
 # The published wheel is the MIT SDK only. The BSL platform layer lives in
@@ -46,6 +46,8 @@ onchain = ["requests>=2.31"]
 crypto = ["eth-account>=0.11"]
 # The repo-root demo agent (Nebius Token Factory / Nemotron). Not packaged.
 demo = ["openai>=1.30"]
+# Ed25519 receipt signing for the BSL log receiver (platform layer).
+receiver = ["cryptography>=42"]
 dev = ["pytest>=7.0", "ruff>=0.1.0", "build>=1.2", "twine>=5.0"]
 all = ["requests>=2.31", "eth-account>=0.11"]
 

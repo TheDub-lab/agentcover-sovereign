@@ -221,6 +221,7 @@ class ScopeRule:
     max_cost: float | None = None    # PER-RULE cost cap (tightest wins)
     requires_approval: bool = False  # this rule always needs approval
     allow_subactions: bool = True    # can this spawn sub-agents?
+    rule_id: str | None = None       # optional stable id, recorded in log events
 
 
 # ---------------------------------------------------------------------------

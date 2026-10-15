@@ -137,6 +137,29 @@ unbound method, an unvalidated param) is what makes the other controls
 decorative — the `safety-guard lint` command exists to catch exactly that
 before deploy.
 
+## Log shipping (third-party evidence)
+
+A guard can ship each decision to a receiver the operator does not control, so
+the local hash chain becomes evidence someone else holds. The **sender**
+(`safety_protocol.shipping`) is in the free MIT SDK; the **receiver**
+(`safety_protocol.platform.receiver`, BSL) verifies the chain and returns a
+signed receipt.
+
+```jsonc
+"mode": "enforce",                 // or "shadow": log what policy would block, allow anyway
+"shipping": {
+  "receiver_url": "https://logs.example.com",
+  "api_key": "per-agent key",
+  "batch_size": 50, "flush_interval_s": 5, "heartbeat_interval_s": 60,
+  "log_params": "none"             // none | redacted | full (raw params ship only if not none)
+}
+```
+
+Shipping is asynchronous and durable (local outbox first, batches, retry with
+backoff); actions never wait on the receiver. Raw params are never shipped by
+default — only `params_digest` and `param_keys`. See
+[`docs/log-shipping.md`](docs/log-shipping.md) for the full spec.
+
 ## Architecture
 
 | Layer | What it is | Status |
