@@ -9,6 +9,8 @@ config change that decides whether the agent exfiltrates your API keys.*
 > stdio). Paths are shown relative to the demo workspace; the workspace root is
 > written as `<root>`.
 
+![The same four injected calls, first without the guard and then blocked by it](docs/img/mcp-injection-demo.gif)
+
 ---
 
 Prompt injection is usually framed as a model problem: *if the model were
