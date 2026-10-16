@@ -224,6 +224,8 @@ with a least-privilege config (all three injected calls blocked, hash-chained
 audit). Reproduce with `python examples/mcp_injection_demo.py`; write-up in
 [`DEMO_MCP_INJECTION.md`](DEMO_MCP_INJECTION.md).
 
+![The same four injected calls: succeeding without the guard, blocked with it](docs/img/mcp-injection-demo.gif)
+
 ## Strands & LangChain wrappers — gate tool calls in-process
 
 When the agent calls tools in-process (no MCP server), wrap each tool so the
