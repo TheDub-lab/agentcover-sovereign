@@ -205,7 +205,7 @@ try:
 
     __version__ = _version("safety-protocol")
 except PackageNotFoundError:  # running from a source checkout
-    __version__ = "0.6.0"
+    __version__ = "0.6.1"
 __all__ = [
     "ActionOutcome",
     "ProtocolState",

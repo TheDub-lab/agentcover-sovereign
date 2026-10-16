@@ -1,6 +1,6 @@
 [project]
 name = "safety-protocol"
-version = "0.6.0"
+version = "0.6.1"
 description = "Safety protocol framework for LLM agents — binding, scope, enforcement, monitoring, approval, audit, killswitch"
 readme = "README.md"
 # The published wheel is the MIT SDK only. The BSL platform layer lives in

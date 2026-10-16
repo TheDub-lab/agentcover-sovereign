@@ -170,6 +170,14 @@ def guard_strands_tool(
 
         agent = Agent(tools=[guard_strands_tool(read_file, protocol)])
     """
+    raw = getattr(tool_obj, "__wrapped__", None)
+    tool_name = name or getattr(tool_obj, "tool_name", None)
+    if not tool_name:
+        raise TypeError(
+            "guard_strands_tool expects a tool from strands.tool "
+            "(it needs a .tool_name)"
+        )
+
     try:
         from strands import tool as _strands_tool
     except ImportError as exc:  # pragma: no cover - optional dependency
@@ -178,14 +186,6 @@ def guard_strands_tool(
             "(pip install strands-agents)"
         ) from exc
 
-    tool_name = name or getattr(tool_obj, "tool_name", None)
-    if not tool_name:
-        raise TypeError(
-            "guard_strands_tool expects a tool from strands.tool "
-            "(it needs a .tool_name)"
-        )
-
-    raw = getattr(tool_obj, "__wrapped__", None)
     if raw is None or not callable(raw):
         if not callable(tool_obj):
             raise TypeError(
@@ -259,14 +259,6 @@ def guard_langchain_tool(
         safe_read = guard_langchain_tool(read_file, protocol)
         agent = create_react_agent(llm, [safe_read])
     """
-    try:
-        from langchain_core.tools import StructuredTool, ToolException
-    except ImportError as exc:  # pragma: no cover - optional dependency
-        raise ImportError(
-            "guard_langchain_tool requires 'langchain-core' "
-            "(pip install langchain-core)"
-        ) from exc
-
     tool_name = name or getattr(tool_obj, "name", None)
     if not tool_name:
         raise TypeError(
@@ -274,6 +266,14 @@ def guard_langchain_tool(
         )
     if not hasattr(tool_obj, "invoke"):
         raise TypeError("guard_langchain_tool expects a LangChain BaseTool")
+
+    try:
+        from langchain_core.tools import StructuredTool, ToolException
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            "guard_langchain_tool requires 'langchain-core' "
+            "(pip install langchain-core)"
+        ) from exc
 
     description = getattr(tool_obj, "description", "") or ""
     args_schema = getattr(tool_obj, "args_schema", None)
