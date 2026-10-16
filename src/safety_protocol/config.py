@@ -16,7 +16,12 @@ from __future__ import annotations
 
 from .core import AuditTrail, ScopeRule
 from .protocol import SafetyProtocol
-from .scope_linter import Severity, lint_report, lint_rules
+from .scope_linter import (
+    blocking_findings,
+    lint_mcp_config,
+    lint_report,
+    lint_rules,
+)
 
 
 def load_rules(cfg: dict) -> list[ScopeRule]:
@@ -48,8 +53,8 @@ def build_protocol_from_config(cfg: dict) -> tuple[SafetyProtocol, list]:
     vocab = cfg.get("allowed_action_types", [])
     rules = load_rules(cfg)
     findings = lint_rules(rules, vocab)
-    blocking = [f for f in findings
-                if f.severity in (Severity.ERROR, Severity.WARN)]
+    findings += lint_mcp_config(cfg.get("mcp"))
+    blocking = blocking_findings(findings)
     if blocking:
         # Fail closed: refuse to run with a broad/self-contradictory ruleset.
         raise SystemExit(
@@ -66,5 +71,6 @@ def build_protocol_from_config(cfg: dict) -> tuple[SafetyProtocol, list]:
         audit=audit,
         allowed_action_types=vocab,
         mode=cfg.get("mode", "enforce"),
+        approval_ttl_s=cfg.get("approval_ttl_s", 300.0),
     )
     return protocol, findings

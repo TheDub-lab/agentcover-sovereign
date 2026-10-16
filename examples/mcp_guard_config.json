@@ -4,7 +4,7 @@
   "mode": "enforce",
   "budget_limit": 10.0,
   "approval_threshold_cost": 5.0,
-  "allowed_action_types": ["mcp_tool_call"],
+  "allowed_action_types": ["mcp_tool_call", "mcp_resource_read"],
   "scope_rules": [
     {
       "id": "mcp-read",
@@ -26,16 +26,31 @@
       "match": "exact",
       "methods": ["MCP"],
       "param_schema": {
-        "required": ["path"],
-        "properties": {"path": {"type": "string"}},
+        "required": ["path", "content"],
+        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
         "additional_properties": false
       },
       "requires_approval": true
+    },
+    {
+      "id": "mcp-read-reports",
+      "action_type": "mcp_resource_read",
+      "allowed_targets": ["file:///data/reports/*"],
+      "match": "glob",
+      "methods": ["MCP"],
+      "param_schema": {
+        "required": ["uri"],
+        "properties": {"uri": {"type": "string"}},
+        "additional_properties": false
+      },
+      "requires_approval": false
     }
   ],
   "mcp": {
     "action_type": "mcp_tool_call",
     "method": "MCP",
-    "cost_per_call": 0.0
+    "cost_per_call": 0.0,
+    "gate_resources": true,
+    "allowed_uri_schemes": ["file"]
   }
 }

@@ -165,12 +165,19 @@ from .integrations import (
     guard_strands_tool,
     guard_strands_tools,
 )
-from .mcp_proxy import MCPProxy
+from .mcp_proxy import MCPProxy, normalize_resource_uri
 from .onchain_payment_verifier import OnChainPaymentVerifier
 from .payments import PaymentEnvelope, SafeSpendAgent, SimWallet
 from .protocol import BoundAgent, SafetyProtocol
 from .real_wallet import HAS_REAL_CRYPTO, RealWallet
-from .scope_linter import Finding, Severity, lint_report, lint_rules
+from .scope_linter import (
+    Finding,
+    Severity,
+    blocking_findings,
+    lint_mcp_config,
+    lint_report,
+    lint_rules,
+)
 from .shipping import (
     LogShipper,
     Outbox,
@@ -205,7 +212,7 @@ try:
 
     __version__ = _version("safety-protocol")
 except PackageNotFoundError:  # running from a source checkout
-    __version__ = "0.6.1"
+    __version__ = "0.7.0"
 __all__ = [
     "ActionOutcome",
     "ProtocolState",
@@ -218,6 +225,7 @@ __all__ = [
     "SafetyProtocol",
     "BoundAgent",
     "MCPProxy",
+    "normalize_resource_uri",
     "ToolDecision",
     "evaluate_tool_call",
     "guard_strands_tool",
@@ -244,7 +252,9 @@ __all__ = [
     "verify_event_hash",
     "params_digest",
     "lint_rules",
+    "lint_mcp_config",
     "lint_report",
+    "blocking_findings",
     "Finding",
     "Severity",
     "GuardService",

@@ -36,7 +36,7 @@ from importlib.resources import files
 from safety_protocol.config import build_protocol_from_config
 from safety_protocol.core import ActionOutcome, ActionRequest
 from safety_protocol.payments import SafeSpendAgent, SimWallet
-from safety_protocol.scope_linter import Severity, lint_report
+from safety_protocol.scope_linter import blocking_findings, lint_report
 from safety_protocol.shipping import shipper_from_config
 
 
@@ -156,12 +156,19 @@ def cmd_mcp_proxy(args):
         sys.exit(2)
     from safety_protocol.mcp_proxy import run_mcp_proxy
 
-    run_mcp_proxy(
-        cfg,
-        upstream,
-        control_host=args.control_host,
-        control_port=None if args.no_control else args.control_port,
-    )
+    try:
+        run_mcp_proxy(
+            cfg,
+            upstream,
+            control_host=args.control_host,
+            control_port=None if args.no_control else args.control_port,
+            approver_secret=args.approver_secret,
+            approver_secret_file=args.approver_secret_file,
+            require_approver_secret=not args.no_approver_secret,
+        )
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
 
 
 def cmd_lint(args):
@@ -174,9 +181,7 @@ def cmd_lint(args):
         print(str(e))
         sys.exit(1)
     print(lint_report(findings))
-    blocking = [f for f in findings
-                if f.severity in (Severity.ERROR, Severity.WARN)]
-    sys.exit(1 if blocking else 0)
+    sys.exit(1 if blocking_findings(findings) else 0)
 
 
 def main(argv=None):
@@ -227,6 +232,14 @@ def main(argv=None):
                    help="localhost port for the approval control endpoint")
     m.add_argument("--no-control", action="store_true",
                    help="disable the local approval control endpoint")
+    m.add_argument("--approver-secret", default=None,
+                   help="approver secret required on POST /approve (default: "
+                        "a random one is generated and printed at startup)")
+    m.add_argument("--approver-secret-file", default=None,
+                   help="write the generated approver secret to this 0600 file")
+    m.add_argument("--no-approver-secret", action="store_true",
+                   help="do not require a secret on the control endpoint "
+                        "(loopback only; refuses non-loopback)")
     m.add_argument("upstream", nargs=argparse.REMAINDER,
                    help="-- <mcp-server-cmd> [args...]")
     m.set_defaults(func=cmd_mcp_proxy)

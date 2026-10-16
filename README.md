@@ -171,15 +171,22 @@ extra dependencies. An MCP scope rule binds the **tool name** and its
 }
 ```
 
-- Only `tools/call` is intercepted. `initialize`, `tools/list`, resources,
-  prompts and notifications pass through untouched; the `initialize` reply is
-  annotated so the client can see the guard is in the path.
-- A blocked call returns a normal MCP tool error (`isError: true`) carrying the
+- `tools/call` is intercepted, and so are `resources/read` and
+  `resources/subscribe` (on by default, `mcp.gate_resources`). The resource URI
+  is normalized — single percent-decode, `..` collapsed with traversal
+  rejected, scheme allowlisted — *before* the rule is consulted, so `%2e%2e/`
+  cannot slip past a `file:///data/reports/*` rule. `initialize`, `tools/list`,
+  resources list, prompts and notifications pass through untouched; the
+  `initialize` reply is annotated so the client can see the guard is in the path.
+- A blocked call returns a normal MCP error (`isError: true`) carrying the
   reason and the matched rule, so the agent can react instead of silently
   failing. A denied call never reaches the upstream server.
 - Tools that require approval are held; the agent gets the approval token, an
   operator decides over the localhost control endpoint (`GET /pending`,
-  `POST /approve`), then the agent retries.
+  `POST /approve`), then the agent retries. The control endpoint requires an
+  approver secret (generated at start); tokens are single-use, expire, and are
+  bound to the exact intent, and the approver identity + channel land in the
+  audit chain. A non-loopback control host without a secret is refused.
 - `shadow` mode forwards everything but records what policy *would* have denied.
 - `mcp.cost_per_call` (default `0`) gives every call a declared cost, so the
   budget and approval threshold apply to tool calls too.
@@ -326,9 +333,14 @@ bug.
 - **Availability and side channels.** It is not a sandbox or an IDS, does not
   detect exfiltration through an allowed channel, and does not measure real
   cost: cost is declared by the caller and used for the caps.
-- **Approval integrity.** If the agent can approve its own request (a
-  misconfigured approver), approval is decorative. The approver must be a
-  separate, human-controlled channel.
+- **Approval integrity.** Tokens are single-use, expire, are bound to the exact
+  intent, and refuse self-approval — so a leaked token cannot be replayed and an
+  agent cannot approve itself. But approval is only as strong as the channel: the
+  control endpoint's secret is a local step up, and if the agent shares the
+  operator's OS user or can reach the control endpoint, approval is decorative.
+  Out-of-band approval over a channel the agent cannot touch
+  (signed one-time link / separate UDS with peer-UID checks) is roadmap; the
+  approver must be a separate, human-controlled channel.
 - **The on-chain and insurance layers.** The on-chain layer is simulated, the
   insurance layer is a reference interface. Neither is production
   infrastructure yet.

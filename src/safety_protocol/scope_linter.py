@@ -46,11 +46,26 @@ class Finding:
     message: str
     rule_index: int | None = None
     action_type: str | None = None
+    # None => blocking follows severity (ERROR/WARN block). False => the finding
+    # is reported loudly but does not stop the guard from starting.
+    blocking: bool | None = None
 
     def __str__(self) -> str:
         loc = f"[rule {self.rule_index}]" if self.rule_index is not None else ""
         at = f" ({self.action_type})" if self.action_type else ""
         return f"{self.severity.value}{loc}{at} {self.code}: {self.message}"
+
+
+def blocking_findings(findings: Iterable[Finding]) -> list[Finding]:
+    """Findings that should stop the guard from starting.
+
+    ERROR and WARN block, unless the finding is explicitly non-blocking
+    (``blocking=False``) — used for loud-but-survivable migration warnings.
+    """
+    return [
+        f for f in findings
+        if f.severity in (Severity.ERROR, Severity.WARN) and f.blocking is not False
+    ]
 
 
 # Tokens that, on their own, indicate a coarse allowlist. A rule that
@@ -178,6 +193,52 @@ def lint_rules(
     return findings
 
 
+def lint_mcp_config(mcp_config: dict | None) -> list[Finding]:
+    """Lint the ``mcp`` config block of a guard config.
+
+    Kept separate from :func:`lint_rules` because these are properties of the
+    proxy wiring, not of an individual scope rule. Returns Findings (empty =
+    clean). A missing ``mcp`` block (older configs) is not a finding — the
+    proxy simply is not in use.
+    """
+    if not isinstance(mcp_config, dict):
+        return []
+
+    findings: list[Finding] = []
+
+    # Resource read/subscribe gating is on by default. Turning it off is
+    # survivable (you may want tool-call-only gating while you write rules),
+    # so it is loud but non-blocking.
+    if mcp_config.get("gate_resources") is False:
+        findings.append(Finding(
+            Severity.WARN, "MCP_RESOURCES_UNGATED",
+            "mcp.gate_resources is false: resources/read and resources/subscribe "
+            "are forwarded WITHOUT a scope decision. Resource reads are a data "
+            "exfiltration path and are gated by default — keep this off only "
+            "short-term, in shadow mode, to learn real traffic.",
+            blocking=False,
+        ))
+
+    schemes = mcp_config.get("allowed_uri_schemes")
+    if schemes is not None:
+        if not isinstance(schemes, list) or not all(
+            isinstance(s, str) and s for s in schemes
+        ):
+            findings.append(Finding(
+                Severity.ERROR, "MCP_URI_SCHEMES_INVALID",
+                "mcp.allowed_uri_schemes must be a non-empty list of non-empty "
+                "strings (e.g. [\"file\"]).",
+            ))
+        elif not schemes:
+            findings.append(Finding(
+                Severity.ERROR, "MCP_URI_SCHEMES_EMPTY",
+                "mcp.allowed_uri_schemes is empty — every resource URI would be "
+                "rejected. List the schemes you trust (e.g. [\"file\"]).",
+            ))
+
+    return findings
+
+
 def lint_report(findings: list[Finding]) -> str:
     """Human-readable report. Empty findings -> a clean banner."""
     if not findings:
@@ -187,7 +248,8 @@ def lint_report(findings: list[Finding]) -> str:
         lines.append(str(f))
     n_err = sum(1 for f in findings if f.severity == Severity.ERROR)
     n_warn = sum(1 for f in findings if f.severity == Severity.WARN)
+    n_block = len(blocking_findings(findings))
     lines.append("=" * 60)
     lines.append(f"{n_err} ERROR(s), {n_warn} WARN(s) — "
-                 f"{'BLOCK' if (n_err or n_warn) else 'ok to ship'}")
+                 f"{'BLOCK' if n_block else 'ok to ship'}")
     return "\n".join(lines)

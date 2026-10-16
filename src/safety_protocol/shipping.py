@@ -331,6 +331,14 @@ class LogShipper:
             "config_hash": self.config_hash,
             "prev_hash": prev_hash,
         }
+        # Approval attribution (only present for approval decisions). Kept
+        # optional so non-approval events keep their original shape and hash.
+        approver = result.execution_log.get("approver")
+        if approver is not None:
+            event["approver"] = approver
+        channel = result.execution_log.get("approval_channel")
+        if channel is not None:
+            event["approval_channel"] = channel
         if self.log_params == "redacted":
             event["params"] = _mask_params(request.params)
         elif self.log_params == "full":

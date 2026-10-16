@@ -32,6 +32,7 @@ from .core import (
     target_matches,
     validate_params,
 )
+from .shipping import params_digest
 
 
 class SafetyProtocol:
@@ -58,6 +59,7 @@ class SafetyProtocol:
         allowed_action_types: list[str] | None = None,
         mode: str = "enforce",
         decision_sinks: list | None = None,
+        approval_ttl_s: float = 300.0,
     ):
         """
         Args:
@@ -74,6 +76,10 @@ class SafetyProtocol:
                 referenced by scope_rules is used as the vocabulary. Passing
                 an explicit list is recommended — it forces you to name what
                 the agent can do.
+            approval_ttl_s: How long an approval token stays valid, and how
+                long an approved intent stays "whitened" for the retry, in
+                seconds. Bounds the window in which a leaked token can be
+                replayed.
         """
         self.agent_id = agent_id
         self.user_id = user_id
@@ -85,6 +91,11 @@ class SafetyProtocol:
         self._state = ProtocolState.ACTIVE
         self._spent = 0.0
         self._pending_approvals: dict[str, ActionRequest] = {}
+        # Per-token metadata: created_at / expires_at / digest / channel /
+        # session_id. Kept alongside the pending request so a token can be
+        # expired, bound to the exact intent, and attributed to a channel.
+        self._approval_meta: dict[str, dict] = {}
+        self.approval_ttl_s = float(approval_ttl_s)
 
         # "enforce" (default) blocks per policy. "shadow" logs what the
         # policy WOULD have done (policy_decision) but returns allowed for
@@ -100,10 +111,12 @@ class SafetyProtocol:
         self.decision_sinks: list = list(decision_sinks or [])
         # Best-effort id of the scope rule that produced the last decision.
         self._matched_rule_id: str | None = None
-        # Approved intents: (target, cost-cents) -> expiry ts. When a human
-        # approves an action, the matching retry is allowed for a short window
-        # so the agent can actually proceed after sign-off. Per-intent, not
-        # a blanket allow — a different target or cost still needs approval.
+        # Approved intents: (target, cost-cents, intent-digest) -> expiry ts.
+        # When a human approves an action, the matching retry is allowed for a
+        # short window so the agent can actually proceed after sign-off.
+        # Per-intent, not a blanket allow — a different target, cost, or set of
+        # params still needs approval (the digest covers action_type + target +
+        # params, so an approved call cannot be swapped for a different one).
         self._approved_intents: dict[tuple, float] = {}
         self._start_time = time.time()
 
@@ -354,9 +367,23 @@ class SafetyProtocol:
     # ------------------------------------------------------------------
 
     def _needs_approval(self, request: ActionRequest) -> bool:
-        """Does this action require human approval before execution?"""
+        """Does this action require human approval before execution?
+
+        Approval is a property of the rule that actually *covers* the target —
+        not of the action_type as a whole. Two rules can share an action_type
+        (e.g. an MCP ``read_file`` rule and an MCP ``write_file`` rule); if only
+        the write rule sets ``requires_approval``, a read must not be held.
+        """
         for rule in self.scope_rules:
-            if rule.action_type == request.action_type and rule.requires_approval:
+            if rule.action_type not in (None, request.action_type):
+                continue
+            # Only a rule that permits this target can require approval for it.
+            if rule.allowed_targets is not None and not any(
+                target_matches(p, request.target, rule.match)
+                for p in rule.allowed_targets
+            ):
+                continue
+            if rule.requires_approval:
                 return True
 
         if request.estimated_cost >= self.approval_threshold_cost:
@@ -364,10 +391,46 @@ class SafetyProtocol:
 
         return request.urgency == "critical"
 
-    def request_approval(self, request: ActionRequest) -> str:
-        """Submit an action for human approval. Returns approval token."""
+    def _approval_digest(self, request: ActionRequest) -> str:
+        """Digest binding an approval to the exact intent that was requested.
+
+        Covers action_type + target + params. An approval for one intent can
+        never whiten a different one (different verb, target, or params all
+        change the digest).
+        """
+        return params_digest({
+            "action_type": request.action_type,
+            "target": request.target,
+            "params": request.params,
+        })
+
+    def request_approval(
+        self,
+        request: ActionRequest,
+        *,
+        channel: str | None = None,
+        session_id: str | None = None,
+        ttl_s: float | None = None,
+    ) -> str:
+        """Submit an action for human approval. Returns approval token.
+
+        The token is a short reference id, single-use, and expires after
+        ``approval_ttl_s`` (or ``ttl_s``). ``channel`` records where the
+        approval is expected to arrive (``"control"``, ``"cli"``, ``"telegram"``
+        …) and ``session_id`` lets a caller reject approval replayed on the
+        same session that made the request.
+        """
         token = uuid.uuid4().hex[:12]
+        ttl = self.approval_ttl_s if ttl_s is None else float(ttl_s)
+        now = time.time()
         self._pending_approvals[token] = request
+        self._approval_meta[token] = {
+            "created_at": now,
+            "expires_at": now + ttl,
+            "digest": self._approval_digest(request),
+            "channel": channel,
+            "session_id": session_id,
+        }
         self.audit.append("approval_requested", self.agent_id, {
             "token": token,
             "request_id": request.request_id,
@@ -375,8 +438,44 @@ class SafetyProtocol:
             "target": request.target,
             "estimated_cost": request.estimated_cost,
             "urgency": request.urgency,
+            "digest": self._approval_meta[token]["digest"],
+            "channel": channel,
+            "expires_at": self._approval_meta[token]["expires_at"],
         })
         return token
+
+    def _reject_approval(
+        self,
+        token: str,
+        request: ActionRequest,
+        reason: str,
+        *,
+        approver: str,
+        channel: str | None,
+        code: str,
+    ) -> bool:
+        """Drop a pending approval and record the rejection, hash-chained."""
+        self._pending_approvals.pop(token, None)
+        self._approval_meta.pop(token, None)
+        self.audit.append("approval_rejected", self.agent_id, {
+            "token": token,
+            "request_id": request.request_id,
+            "reason": reason,
+            "code": code,
+            "approver": approver,
+            "channel": channel,
+        })
+        result = ActionResult(
+            request.request_id,
+            ActionOutcome.BLOCKED_SCOPE,
+            block_reason=f"Approval rejected: {reason}",
+        )
+        result.execution_log["approver"] = approver
+        if channel is not None:
+            result.execution_log["approval_channel"] = channel
+        self.monitor.record_action(result, request)
+        self._announce(request, result, decision="rejected")
+        return False
 
     def decide_approval(
         self,
@@ -384,18 +483,61 @@ class SafetyProtocol:
         approved: bool,
         approver: str,
         reason: str | None = None,
+        *,
+        channel: str | None = None,
+        session_id: str | None = None,
     ) -> bool:
-        """Human approves or denies an action. Returns True if approved."""
+        """Human approves or denies an action. Returns True if approved.
+
+        Hardened: the token is single-use and expires; the approver cannot be
+        the agent itself; and an approval arriving on the same ``session_id``
+        as the request is refused. ``channel`` records where the decision came
+        from, and both ``approver`` and ``channel`` land in the hash chain.
+        """
         if token not in self._pending_approvals:
+            self.audit.append("approval_unknown_token", self.agent_id, {
+                "token": token,
+                "approver": approver,
+                "channel": channel,
+            })
             return False
 
-        request = self._pending_approvals.pop(token)
+        request = self._pending_approvals[token]
+        meta = self._approval_meta.get(token, {})
+
+        # An agent must not approve its own action — that is not a human in
+        # the loop, it is the agent talking to itself.
+        if approver and approver == self.agent_id:
+            return self._reject_approval(
+                token, request, "approver is the agent itself (self-approval)",
+                approver=approver, channel=channel, code="self_approval")
+
+        # Expiry — a stale token cannot be replayed later.
+        expires_at = meta.get("expires_at")
+        if expires_at is not None and time.time() >= expires_at:
+            return self._reject_approval(
+                token, request, "approval token expired",
+                approver=approver, channel=channel, code="expired")
+
+        # Same-session replay — the request and its approval must come from
+        # different sessions/channels when a session id is supplied.
+        if (session_id is not None and meta.get("session_id") is not None
+                and session_id == meta["session_id"]):
+            return self._reject_approval(
+                token, request, "approval arrived on the request session",
+                approver=approver, channel=channel, code="same_session")
+
+        digest = meta.get("digest") or self._approval_digest(request)
+        self._pending_approvals.pop(token, None)
+        self._approval_meta.pop(token, None)
         self.audit.append("approval_decision", self.agent_id, {
             "token": token,
             "request_id": request.request_id,
             "approved": approved,
             "approver": approver,
             "reason": reason,
+            "channel": channel,
+            "digest": digest,
         })
 
         result = ActionResult(
@@ -406,6 +548,9 @@ class SafetyProtocol:
             else None,
             executed=approved,
         )
+        result.execution_log["approver"] = approver
+        if channel is not None:
+            result.execution_log["approval_channel"] = channel
         self.monitor.record_action(result, request)
 
         if approved and self.budget_limit is not None:
@@ -413,9 +558,9 @@ class SafetyProtocol:
 
         if approved:
             # Whiten this exact intent for a short window so the agent's
-            # retry (same target + cost) is allowed to proceed.
-            key = (request.target, int(round(request.estimated_cost * 100)))
-            self._approved_intents[key] = time.time() + 300  # 5-minute window
+            # retry (same target + cost + params) is allowed to proceed.
+            key = (request.target, int(round(request.estimated_cost * 100)), digest)
+            self._approved_intents[key] = time.time() + self.approval_ttl_s
 
         self._announce(request, result, decision="approved" if approved else "rejected")
         return approved
@@ -429,6 +574,8 @@ class SafetyProtocol:
             "target": req.target,
             "estimated_cost": req.estimated_cost,
             "urgency": req.urgency,
+            "channel": self._approval_meta.get(token, {}).get("channel"),
+            "expires_at": self._approval_meta.get(token, {}).get("expires_at"),
         } for token, req in self._pending_approvals.items()]
 
     # ------------------------------------------------------------------
@@ -483,7 +630,10 @@ class SafetyProtocol:
         # 5. Approval gate
         if self._needs_approval(request):
             # If a human already approved this exact intent recently, honor it.
-            key = (request.target, int(round(request.estimated_cost * 100)))
+            # The digest makes the approval specific to this action_type +
+            # target + params, so a retry with different params is not allowed.
+            key = (request.target, int(round(request.estimated_cost * 100)),
+                   self._approval_digest(request))
             expiry = self._approved_intents.get(key)
             if not (expiry and time.time() < expiry):
                 # In shadow mode we do not create a real pending approval; the
@@ -552,6 +702,26 @@ class SafetyProtocol:
                 "urgency": request.urgency,
             })
 
+        self._announce(request, result)
+        return result
+
+    def block(
+        self,
+        request: ActionRequest,
+        reason: str,
+        outcome: ActionOutcome = ActionOutcome.BLOCKED_SCOPE,
+    ) -> ActionResult:
+        """Record a denial that never reached policy evaluation.
+
+        Used by adapters (e.g. the MCP proxy) to reject malformed input — a
+        resource URI that fails normalization — in every mode, including
+        shadow. Shadow mode answers policy *questions*; malformed input is
+        never forwarded to the upstream.
+        """
+        result = ActionResult(request.request_id, outcome, block_reason=reason)
+        result.execution_log["policy_outcome"] = outcome.value
+        result.execution_log["policy_reason"] = reason
+        self.monitor.record_action(result, request)
         self._announce(request, result)
         return result
 

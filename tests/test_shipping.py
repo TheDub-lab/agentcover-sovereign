@@ -265,11 +265,14 @@ def test_approval_decision_is_shipped(tmp_path):
         method="POST", params={"query": "hi"}))
     assert res.outcome == ActionOutcome.PENDING_APPROVAL
     token = res.requires_approval_for
-    p.decide_approval(token, True, "bob")
+    p.decide_approval(token, True, "bob", channel="control")
     evs = events_of(shipper)
     assert evs[0]["decision"] == "needs_approval"
     assert evs[1]["decision"] == "approved"
     assert evs[1]["policy_decision"] == "approved"
+    # approver identity + channel are part of the externally verifiable event
+    assert evs[1]["approver"] == "bob"
+    assert evs[1]["approval_channel"] == "control"
 
 
 def test_killswitch_is_shipped(tmp_path):
