@@ -18,6 +18,21 @@ actually on the only path to the action. That assumption and its limits are
 spelled out in [Threat model & non-goals](#threat-model--non-goals); read it
 before trusting the guard with a capability.
 
+## Start here (60 seconds)
+
+```bash
+pip install safety-protocol
+safety-guard init --out guard_config.json          # least-privilege default
+safety-guard mcp-proxy --config guard_config.json -- <your-mcp-server-cmd>
+```
+
+Point your MCP client at that command instead of the server. Deny-by-default:
+any tool call the config does not explicitly allow comes back as a normal MCP
+error (`isError: true`) carrying the reason, and the decision is written to a
+hash-chained audit log. A call that needs approval is held until an operator
+signs off. See the [prompt-injection demo](#prompt-injection-demo) for a full
+blocked run.
+
 ## Install
 
 ```bash
@@ -53,7 +68,7 @@ protocol = SafetyProtocol(
             methods=["POST"],
             param_schema={
                 "required": ["query"],
-                "properties": {"query": {"type": "string", "maximum": 200}},
+                "properties": {"query": {"type": "string", "maxLength": 200}},
                 "additional_properties": False,
             },
             forbidden_targets=["admin", "billing"],
@@ -123,7 +138,7 @@ Equivalent module entry point: `python -m safety_protocol.guard_service --config
       "methods": ["POST"],           // transport verbs permitted
       "param_schema": {              // params MUST satisfy this
         "required": ["query"],
-        "properties": {"query": {"type": "string", "maximum": 200}},
+        "properties": {"query": {"type": "string", "maxLength": 200}}, // length cap
         "additional_properties": false
       },
       "forbidden_targets": ["admin", "billing"],
@@ -135,10 +150,12 @@ Equivalent module entry point: `python -m safety_protocol.guard_service --config
 }
 ```
 
-Every dimension is enforced. Leaving any of them broad (a wildcard prefix, an
-unbound method, an unvalidated param) is what makes the other controls
-decorative — the `safety-guard lint` command exists to catch exactly that
-before deploy.
+Every dimension is enforced. `param_schema` supports `required`, `properties`
+(`type`, `enum`, `minimum`/`maximum` for numbers, `minLength`/`maxLength` for
+strings, `pattern`), and `additional_properties`. Leaving any dimension broad (a
+wildcard prefix, an unbound method, an unvalidated param) is what makes the other
+controls decorative — the `safety-guard lint` command exists to catch exactly
+that before deploy.
 
 ## MCP proxy — route every tool call through the guard
 
@@ -184,7 +201,10 @@ extra dependencies. An MCP scope rule binds the **tool name** and its
 - Tools that require approval are held; the agent gets the approval token, an
   operator decides over the localhost control endpoint (`GET /pending`,
   `POST /approve`), then the agent retries. The control endpoint requires an
-  approver secret (generated at start); tokens are single-use, expire, and are
+  approver secret: generated at start with `secrets.token_urlsafe(32)` and
+  written to a `0600` file (`--approver-secret-file`) or printed once to stderr.
+  Supply a fixed one with `--approver-secret`, or disable the requirement with
+  `--no-approver-secret` (loopback only). Tokens are single-use, expire, and are
   bound to the exact intent, and the approver identity + channel land in the
   audit chain. A non-loopback control host without a secret is refused.
 - `shadow` mode forwards everything but records what policy *would* have denied.
@@ -193,6 +213,16 @@ extra dependencies. An MCP scope rule binds the **tool name** and its
 
 Full detail: [`docs/mcp-proxy.md`](docs/mcp-proxy.md). If your agent is
 in-process instead (Strands, LangChain), guard the tools directly — see below.
+
+### Prompt-injection demo
+
+A poisoned report tells a summarizer agent to read an API key and write an exfil
+copy. The same four calls are run against the **real**
+`@modelcontextprotocol/server-filesystem` — once directly (the injection wins:
+key read, traversal read, exfil written), once through `safety-guard mcp-proxy`
+with a least-privilege config (all three injected calls blocked, hash-chained
+audit). Reproduce with `python examples/mcp_injection_demo.py`; write-up in
+[`DEMO_MCP_INJECTION.md`](DEMO_MCP_INJECTION.md).
 
 ## Strands & LangChain wrappers — gate tool calls in-process
 
@@ -325,6 +355,17 @@ bug.
 - **Semantic mistakes.** The guard compares the action you *declared* against
   the policy you *wrote*. A confused model taking a wrong-but-in-scope action is
   not caught — it is not an intent classifier.
+- **MCP resource gating is lexical.** Resource-URI normalization collapses
+  encoding and traversal tricks in the URI string; it does not resolve symlinks
+  or enforce a root on the **upstream server's** filesystem. A symlink the server
+  follows is the server's behavior, not the guard's.
+- **MCP tool results and `prompts/get` are not judged.** The guard decides
+  whether a call is *made*; it does not scan the content a successful tool
+  returns, nor the text of a prompt, for injected instructions. Both are
+  injection vectors the guard passes through by design.
+- **MCP lists pass through.** The agent can enumerate resource URIs
+  (`resources/list`) and tool names (`tools/list`) even when using them is
+  denied. The guard gates access, not visibility.
 - **A dishonest recorder.** The chain proves integrity of the record, not
   honesty of the recorder. A guard on an owned host can emit a well-formed,
   consistent chain, and a receiver receipt attests only that those bytes arrived
@@ -349,11 +390,12 @@ bug.
 
 | Layer | What it is | Status |
 | ----- | ---------- | ------ |
-| **1. Enforcement** | binding, scope, budget, approval, monitor, audit, killswitch | production-usable (see basis below) |
+| **1. Enforcement** | binding, scope, budget, approval, monitor, audit, killswitch | feature-complete, test-covered, not audited |
 | **2. On-chain anchors** | SBT-style binding + on-chain audit of key events | **simulated** (in-memory, same interface as a real chain) |
 | **3. Insurance** | claims evidence, underwriter reports | interface / reference |
 
-**Basis for "production-usable" (Layer 1).** Feature-complete for its stated
+**Basis for Layer 1 (feature-complete, test-covered, not audited).**
+Feature-complete for its stated
 scope, with the behavior covered by the test suite, run on Python 3.10–3.12 in
 CI on every push. That is what the claim rests on: **tests, not a review or a
 deployment.** There has been no independent security audit and no production
@@ -381,8 +423,8 @@ Current numbers, stated honestly rather than dressed up (as of 2026-10-15):
     layer imports `safety_protocol.scope_linter` and wraps `SafetyProtocol`.
   - The AgentCover CALL-E phone-agent demo in `awesome-phone-call-agents` —
     vendors a faithful subset of this guard as its enforcement engine.
-  - The demo agents in this repo, including the Hermes-venv insurance
-    simulation (`run_mc.bat`, `run_tamagotchi.bat`) and the settlement demos.
+  - The demo agents in this repo — the insurance-claims simulation
+    (`run_mc.bat`, `run_tamagotchi.bat`) and the on-chain settlement demos.
 
 A feature list says what it can do; the list above is what it actually runs in
 front of. If you put it in front of something, open an issue — we would rather

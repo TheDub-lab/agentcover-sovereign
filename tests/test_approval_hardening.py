@@ -68,6 +68,15 @@ def test_expired_token_rejected():
     assert rejected and rejected[-1]["data"]["code"] == "expired"
 
 
+def test_token_cannot_be_used_twice():
+    p = make_protocol()
+    token = p.request_approval(request())
+    assert p.decide_approval(token, True, approver="alice") is True
+    # the same token is spent — a second decision is refused and audited
+    assert p.decide_approval(token, True, approver="alice") is False
+    assert p.audit.query(event_types=["approval_unknown_token"])
+
+
 def test_approval_is_bound_to_params():
     p = make_protocol()
     res = p.execute(request())

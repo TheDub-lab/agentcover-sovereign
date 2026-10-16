@@ -103,7 +103,8 @@ def validate_params(params: dict, schema: dict) -> str | None:
 
     Subset supported (enough for least-privilege param binding):
       - "required": [keys] that must be present
-      - "properties": { key: {type, enum, minimum, maximum, pattern} }
+      - "properties": { key: {type, enum, minimum, maximum, minLength,
+                              maxLength, pattern} }
       - "additional_properties": bool (default False — reject unknown keys)
 
     Returns None if valid, or a human-readable reason string if not.
@@ -149,6 +150,10 @@ def validate_params(params: dict, schema: dict) -> str | None:
             return f"param '{k}'={v} below minimum {spec['minimum']}"
         if "maximum" in spec and isinstance(v, (int, float)) and v > spec["maximum"]:
             return f"param '{k}'={v} above maximum {spec['maximum']}"
+        if "minLength" in spec and isinstance(v, str) and len(v) < spec["minLength"]:
+            return f"param '{k}' is shorter than minLength {spec['minLength']}"
+        if "maxLength" in spec and isinstance(v, str) and len(v) > spec["maxLength"]:
+            return f"param '{k}' is longer than maxLength {spec['maxLength']}"
         if "pattern" in spec and isinstance(v, str) and not re.fullmatch(spec["pattern"], v):
             return f"param '{k}'={v!r} fails pattern {spec['pattern']}"
     return None

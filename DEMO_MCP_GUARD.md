@@ -5,8 +5,8 @@ approvals something an agent can't self-serve.*
 
 > Status: draft for publishing (blog / dev.to / LinkedIn). The transcript and
 > audit chain below are real output from `examples/mcp_proxy_demo.py` against a
-> fake MCP server, captured on 2026-10-16. The one placeholder is marked
-> `[TODO]` at the end.
+> fake MCP server, captured on 2026-10-16. Companion piece on prompt injection
+> against a real filesystem server: `DEMO_MCP_INJECTION.md`.
 
 ---
 
@@ -210,7 +210,7 @@ Being honest about the edges:
 - **`tools/list` is not filtered.** The agent can see tools it may not call;
   calling them is denied.
 
-## Try it
+## Run it
 
 ```bash
 pip install safety-protocol==0.7.0
@@ -218,6 +218,7 @@ pip install safety-protocol==0.7.0
 git clone https://github.com/TheDub-lab/agentcover-sovereign
 cd agentcover-sovereign
 python examples/mcp_proxy_demo.py       # the run above, end to end
+python examples/mcp_injection_demo.py   # prompt injection, blocked (see DEMO_MCP_INJECTION.md)
 ```
 
 MIT-licensed SDK. The audit/evidence service (receiver, signed receipts) is a
@@ -225,16 +226,10 @@ separate layer.
 
 ---
 
-## [TODO] Real agent transcript
+## Real agent transcript
 
-Replace this section with a transcript from a real MCP host — e.g. Claude
-Desktop pointed at `safety-guard mcp-proxy`, or a Strands agent using the
-`guard_strands_tool` wrapper — showing:
-
-- the agent attempting a tool it shouldn't call, and the human-readable error it
-  receives;
-- the operator approving a held call and the agent completing it on retry;
-- a resource read attempt outside scope.
-
-Screenshot or pasted log is fine. Keep it unedited — the point is that the guard
-fires in a real host, not just the harness.
+`DEMO_MCP_INJECTION.md` is the companion run: a poisoned document, the **real**
+`@modelcontextprotocol/server-filesystem`, and the same four calls shown
+succeeding without the guard and blocked with it — captured on 2026-10-16. It is
+the "guard fires in a real host, not just the harness" evidence this section
+asked for, so no separate placeholder remains.

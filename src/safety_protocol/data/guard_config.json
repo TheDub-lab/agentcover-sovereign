@@ -16,7 +16,7 @@
       "param_schema": {
         "required": ["query"],
         "properties": {
-          "query": {"type": "string", "maximum": 200}
+          "query": {"type": "string", "maxLength": 200}
         },
         "additional_properties": false
       },
@@ -33,7 +33,7 @@
         "required": ["resource"],
         "properties": {
           "resource": {"type": "string", "enum": ["weather"]},
-          "memo": {"type": "string", "maximum": 280}
+          "memo": {"type": "string", "maxLength": 280}
         },
         "additional_properties": false
       },
@@ -50,7 +50,7 @@
         "required": ["channel", "body"],
         "properties": {
           "channel": {"type": "string", "enum": ["alice", "team-channel"]},
-          "body": {"type": "string", "maximum": 1000}
+          "body": {"type": "string", "maxLength": 1000}
         },
         "additional_properties": false
       }
