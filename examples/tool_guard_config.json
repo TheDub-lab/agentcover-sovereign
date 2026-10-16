@@ -1,0 +1,39 @@
+{
+  "agent_id": "tool-agent",
+  "user_id": "alice",
+  "mode": "enforce",
+  "budget_limit": 10.0,
+  "approval_threshold_cost": 5.0,
+  "allowed_action_types": ["tool_call"],
+  "scope_rules": [
+    {
+      "id": "tool-read",
+      "action_type": "tool_call",
+      "allowed_targets": ["read_file", "list_directory"],
+      "match": "exact",
+      "methods": ["TOOL"],
+      "param_schema": {
+        "required": ["path"],
+        "properties": {"path": {"type": "string"}},
+        "additional_properties": false
+      },
+      "requires_approval": false
+    },
+    {
+      "id": "tool-write",
+      "action_type": "tool_call",
+      "allowed_targets": ["write_file"],
+      "match": "exact",
+      "methods": ["TOOL"],
+      "param_schema": {
+        "required": ["path", "content"],
+        "properties": {
+          "path": {"type": "string"},
+          "content": {"type": "string"}
+        },
+        "additional_properties": false
+      },
+      "requires_approval": true
+    }
+  ]
+}

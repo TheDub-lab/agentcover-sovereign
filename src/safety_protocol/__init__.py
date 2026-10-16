@@ -124,9 +124,13 @@ what controls operated, what can be reconstructed. The binding + audit trail
 + on-chain record answer these questions. The insurance interface makes the
 agent insurable by providing claims-ready evidence.
 
-The enforcement library (Layer 1) is production-usable. The on-chain layer is
-simulated (same interface as a real chain). In production, use ERC-5192 SBT or
-ERC-8004 on a real chain, and connect the insurance interface to a real
+The enforcement library (Layer 1) is production-usable in the sense that it is
+feature-complete for its scope and its behavior is covered by the test suite
+(run on Python 3.10-3.12 in CI). It has NOT been independently security-audited
+and has not been deployed against real money or credentials by the authors.
+Treat it as reviewed-by-test, not as audited infrastructure. The on-chain layer
+is simulated (same interface as a real chain). In production, use ERC-5192 SBT
+or ERC-8004 on a real chain, and connect the insurance interface to a real
 insurer's claims process.
 
 The architecture is composable: use the protocol alone, add on-chain binding,
@@ -153,6 +157,15 @@ from .core import (
     ProtocolState,
     ScopeRule,
 )
+from .integrations import (
+    ToolDecision,
+    evaluate_tool_call,
+    guard_langchain_tool,
+    guard_langchain_tools,
+    guard_strands_tool,
+    guard_strands_tools,
+)
+from .mcp_proxy import MCPProxy
 from .onchain_payment_verifier import OnChainPaymentVerifier
 from .payments import PaymentEnvelope, SafeSpendAgent, SimWallet
 from .protocol import BoundAgent, SafetyProtocol
@@ -192,7 +205,7 @@ try:
 
     __version__ = _version("safety-protocol")
 except PackageNotFoundError:  # running from a source checkout
-    __version__ = "0.5.0"
+    __version__ = "0.6.0"
 __all__ = [
     "ActionOutcome",
     "ProtocolState",
@@ -204,6 +217,13 @@ __all__ = [
     "Monitor",
     "SafetyProtocol",
     "BoundAgent",
+    "MCPProxy",
+    "ToolDecision",
+    "evaluate_tool_call",
+    "guard_strands_tool",
+    "guard_strands_tools",
+    "guard_langchain_tool",
+    "guard_langchain_tools",
     "OnChainBindingRegistry",
     "OnChainBoundProtocol",
     "OnChainAudit",

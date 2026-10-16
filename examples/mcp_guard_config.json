@@ -1,0 +1,41 @@
+{
+  "agent_id": "mcp-agent",
+  "user_id": "alice",
+  "mode": "enforce",
+  "budget_limit": 10.0,
+  "approval_threshold_cost": 5.0,
+  "allowed_action_types": ["mcp_tool_call"],
+  "scope_rules": [
+    {
+      "id": "mcp-read",
+      "action_type": "mcp_tool_call",
+      "allowed_targets": ["read_file", "list_directory"],
+      "match": "exact",
+      "methods": ["MCP"],
+      "param_schema": {
+        "required": ["path"],
+        "properties": {"path": {"type": "string"}},
+        "additional_properties": false
+      },
+      "requires_approval": false
+    },
+    {
+      "id": "mcp-write",
+      "action_type": "mcp_tool_call",
+      "allowed_targets": ["write_file"],
+      "match": "exact",
+      "methods": ["MCP"],
+      "param_schema": {
+        "required": ["path"],
+        "properties": {"path": {"type": "string"}},
+        "additional_properties": false
+      },
+      "requires_approval": true
+    }
+  ],
+  "mcp": {
+    "action_type": "mcp_tool_call",
+    "method": "MCP",
+    "cost_per_call": 0.0
+  }
+}

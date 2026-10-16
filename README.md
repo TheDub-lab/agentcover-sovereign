@@ -12,8 +12,11 @@ vocabulary, least-privilege scope, spend caps, approval gates, a hash-chained
 audit trail, and a kill switch**. Deny-by-default: an action is permitted only
 if a rule explicitly allows it.
 
-The agent proposes; the protocol decides. The agent cannot talk its way around
-it, because the check is not a prompt instruction.
+The agent proposes; the protocol decides. The check is not a prompt instruction,
+so the model cannot reason its way around **the gate** — provided the gate is
+actually on the only path to the action. That assumption and its limits are
+spelled out in [Threat model & non-goals](#threat-model--non-goals); read it
+before trusting the guard with a capability.
 
 ## Install
 
@@ -137,6 +140,110 @@ unbound method, an unvalidated param) is what makes the other controls
 decorative — the `safety-guard lint` command exists to catch exactly that
 before deploy.
 
+## MCP proxy — route every tool call through the guard
+
+The five-minute integration. Put the guard between an MCP client (Claude
+Desktop, an agent host, another agent) and a real MCP server, and every tool
+call the agent makes is evaluated before it reaches the server.
+
+```bash
+safety-guard mcp-proxy --config guard_config.json -- \
+    npx -y @modelcontextprotocol/server-filesystem /data
+```
+
+The proxy speaks the MCP stdio transport (newline-delimited JSON-RPC) and has no
+extra dependencies. An MCP scope rule binds the **tool name** and its
+**arguments**:
+
+```jsonc
+{
+  "id": "mcp-read",
+  "action_type": "mcp_tool_call",
+  "allowed_targets": ["read_file", "list_directory"],   // tool names
+  "match": "exact",
+  "methods": ["MCP"],                                   // transport verb
+  "param_schema": {                                     // the tool's arguments
+    "required": ["path"],
+    "properties": {"path": {"type": "string"}},
+    "additional_properties": false
+  },
+  "requires_approval": false
+}
+```
+
+- Only `tools/call` is intercepted. `initialize`, `tools/list`, resources,
+  prompts and notifications pass through untouched; the `initialize` reply is
+  annotated so the client can see the guard is in the path.
+- A blocked call returns a normal MCP tool error (`isError: true`) carrying the
+  reason and the matched rule, so the agent can react instead of silently
+  failing. A denied call never reaches the upstream server.
+- Tools that require approval are held; the agent gets the approval token, an
+  operator decides over the localhost control endpoint (`GET /pending`,
+  `POST /approve`), then the agent retries.
+- `shadow` mode forwards everything but records what policy *would* have denied.
+- `mcp.cost_per_call` (default `0`) gives every call a declared cost, so the
+  budget and approval threshold apply to tool calls too.
+
+Full detail: [`docs/mcp-proxy.md`](docs/mcp-proxy.md). If your agent is
+in-process instead (Strands, LangChain), guard the tools directly — see below.
+
+## Strands & LangChain wrappers — gate tool calls in-process
+
+When the agent calls tools in-process (no MCP server), wrap each tool so the
+guard runs *inside* the tool call, before the tool body. A denied call never
+executes; the agent receives a normal tool error carrying the guard's reason.
+
+```python
+from safety_protocol.integrations import (
+    guard_strands_tool, guard_langchain_tool,
+)
+
+# Strands
+from strands import Agent, tool
+
+@tool
+def read_file(path: str) -> str:
+    """Read a file."""
+    return open(path).read()
+
+agent = Agent(tools=[guard_strands_tool(read_file, protocol)])
+
+# LangChain (langchain-core)
+from langchain_core.tools import tool as lc_tool
+
+@lc_tool
+def delete_all(path: str) -> str:
+    """Delete everything."""
+    return do_delete(path)
+
+safe_delete = guard_langchain_tool(delete_all, protocol)  # raise_on_deny=True to raise
+```
+
+The wrapper keeps the tool's name, description and input schema, so the model
+sees no change; only the execution path is gated. Each call becomes one guard
+action (`action_type="tool_call"`, `target`=tool name, `params`=arguments), so
+scope rules, budget, approval and the kill switch all apply exactly as they do
+to any other action.
+
+```jsonc
+{
+  "id": "read-local",
+  "action_type": "tool_call",
+  "allowed_targets": ["read_file"],
+  "match": "exact",
+  "methods": ["TOOL"],
+  "param_schema": {
+    "required": ["path"],
+    "properties": {"path": {"type": "string"}},
+    "additional_properties": false
+  }
+}
+```
+
+Full detail: [`docs/integrations.md`](docs/integrations.md). Both SDKs are
+optional — the wrappers import them lazily, so the core SDK stays
+dependency-free.
+
 ## Log shipping (third-party evidence)
 
 A guard can ship each decision to a receiver the operator does not control, so
@@ -160,13 +267,88 @@ backoff); actions never wait on the receiver. Raw params are never shipped by
 default — only `params_digest` and `param_keys`. See
 [`docs/log-shipping.md`](docs/log-shipping.md) for the full spec.
 
+## Threat model & non-goals
+
+### The assumption this rests on
+
+Enforcement holds only if the guard is a **chokepoint**. "The agent cannot talk
+its way around it" is true when one of these is true — otherwise the claim is
+just what the guard says about traffic it happens to see:
+
+1. **The guard holds the capability.** The wallet key, the API credential, the
+   SMTP login lives with the guard; the agent asks the guard to use it. The
+   agent has nothing to use directly.
+2. **The guard is the only egress path.** All of the agent's network and tool
+   access goes through the guard (proxy / firewall), and the agent has no other
+   route to the network, the filesystem, or a second credential.
+
+The MCP proxy and the Strands/LangChain wrappers are both shape (2) for tool
+calling: the agent's only path to a tool is through the guard (in-process, the
+wrapped tool object is the only handle; over MCP, the proxy is the only path to
+the server).
+
+If the agent keeps its own credentials or has egress the guard does not see,
+every control here is **advisory**. The guard will faithfully evaluate, deny and
+record what is put in front of it; the agent acts around it anyway. This is the
+most likely real-world failure, and it is a deployment problem, not a library
+bug.
+
+### What it does defend against
+
+- A model induced (prompt injection, jailbreak, "ignore previous instructions")
+  to attempt an action outside the declared scope — blocked and recorded,
+  because the bound is in infrastructure rather than in a prompt.
+- Spend beyond a cap, an action above the approval threshold, a revoked binding
+  or an engaged kill switch — regardless of what the model believes.
+- After-the-fact tampering with the local audit record (hash chain), and — with
+  log shipping — with the record as held by a third party.
+
+### What it does not defend against
+
+- **A compromised host.** Code running on the host can read the guard's memory,
+  edit the config, kill the process, or use the credentials itself. Host and OS
+  hardening are out of scope.
+- **Misconfiguration.** `safety-guard lint` catches the mechanically broad
+  patterns it knows (catch-all prefixes, unbound methods, missing param
+  schemas). It cannot know your intent. `https://*`, an over-permissive
+  `param_schema`, or a `regex` written too loosely is enforced exactly as
+  written. Correct policy is the operator's job.
+- **Bypass paths.** Any credential or egress the guard does not hold (see the
+  assumption above).
+- **Semantic mistakes.** The guard compares the action you *declared* against
+  the policy you *wrote*. A confused model taking a wrong-but-in-scope action is
+  not caught — it is not an intent classifier.
+- **A dishonest recorder.** The chain proves integrity of the record, not
+  honesty of the recorder. A guard on an owned host can emit a well-formed,
+  consistent chain, and a receiver receipt attests only that those bytes arrived
+  at that time. Non-repudiation needs a signing key held somewhere the guard
+  cannot reach — not implemented.
+- **Availability and side channels.** It is not a sandbox or an IDS, does not
+  detect exfiltration through an allowed channel, and does not measure real
+  cost: cost is declared by the caller and used for the caps.
+- **Approval integrity.** If the agent can approve its own request (a
+  misconfigured approver), approval is decorative. The approver must be a
+  separate, human-controlled channel.
+- **The on-chain and insurance layers.** The on-chain layer is simulated, the
+  insurance layer is a reference interface. Neither is production
+  infrastructure yet.
+
 ## Architecture
 
 | Layer | What it is | Status |
 | ----- | ---------- | ------ |
-| **1. Enforcement** | binding, scope, budget, approval, monitor, audit, killswitch | production-usable |
+| **1. Enforcement** | binding, scope, budget, approval, monitor, audit, killswitch | production-usable (see basis below) |
 | **2. On-chain anchors** | SBT-style binding + on-chain audit of key events | **simulated** (in-memory, same interface as a real chain) |
 | **3. Insurance** | claims evidence, underwriter reports | interface / reference |
+
+**Basis for "production-usable" (Layer 1).** Feature-complete for its stated
+scope, with the behavior covered by the test suite, run on Python 3.10–3.12 in
+CI on every push. That is what the claim rests on: **tests, not a review or a
+deployment.** There has been no independent security audit and no production
+deployment by the authors against real money or real credentials. Treat it as
+reviewed-by-test rather than audited infrastructure, and read
+[Threat model & non-goals](#threat-model--non-goals) before it holds a
+capability you care about.
 
 > **The on-chain layer is simulated.** It is not third-party verifiable until a
 > real contract is deployed. The library discloses this in every binding proof
@@ -175,6 +357,24 @@ default — only `params_digest` and `param_keys`. See
 
 `ReferenceDeployment` wires all three layers together; the layers are
 composable and each adds value on its own.
+
+## Adoption
+
+Current numbers, stated honestly rather than dressed up (as of 2026-10-15):
+
+- **PyPI downloads:** ~300 since first publication (source: pypistats.org).
+- **GitHub:** 0 stars, 0 forks. It is early.
+- **Used by**:
+  - `paypal-agentsafe` (Nebius x NVIDIA Global AI Hackathon) — its governance
+    layer imports `safety_protocol.scope_linter` and wraps `SafetyProtocol`.
+  - The AgentCover CALL-E phone-agent demo in `awesome-phone-call-agents` —
+    vendors a faithful subset of this guard as its enforcement engine.
+  - The demo agents in this repo, including the Hermes-venv insurance
+    simulation (`run_mc.bat`, `run_tamagotchi.bat`) and the settlement demos.
+
+A feature list says what it can do; the list above is what it actually runs in
+front of. If you put it in front of something, open an issue — we would rather
+have three real users listed than a bigger number.
 
 ## Development
 

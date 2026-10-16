@@ -12,6 +12,7 @@ scope):
   check    ask the guard whether an intent is allowed  (--action/--target/...)
   pay      request a gated payment                       (--recipient/--usd)
   lint     lint the config ruleset and exit non-zero if too broad
+  mcp-proxy  run an MCP server behind the guard (every tool call gated)
 
 Run:
   safety-guard init    --out guard_config.json
@@ -22,6 +23,8 @@ Run:
   safety-guard pay     --config guard_config.json \\
         --recipient 0xMerchant1111111111111111111111111111111 --usd 0.10
   safety-guard lint    --config guard_config.json
+  safety-guard mcp-proxy --config guard_config.json -- \\
+        npx -y @modelcontextprotocol/server-filesystem /data
 """
 from __future__ import annotations
 
@@ -137,6 +140,30 @@ def cmd_pay(args):
     sys.exit(0 if out["allowed"] else 1)
 
 
+def cmd_mcp_proxy(args):
+    """Run an upstream MCP server behind the guard over stdio."""
+    cfg = load_cfg(args.config)
+    upstream = list(args.upstream or [])
+    if upstream and upstream[0] == "--":
+        upstream = upstream[1:]
+    if not upstream:
+        print(
+            "error: no upstream MCP command given.\n"
+            "usage: safety-guard mcp-proxy --config guard_config.json -- "
+            "<mcp-server-cmd> [args...]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    from safety_protocol.mcp_proxy import run_mcp_proxy
+
+    run_mcp_proxy(
+        cfg,
+        upstream,
+        control_host=args.control_host,
+        control_port=None if args.no_control else args.control_port,
+    )
+
+
 def cmd_lint(args):
     cfg = load_cfg(args.config)
     # Rebuild via the same path the guard uses, so lint + fail-closed match.
@@ -190,6 +217,19 @@ def main(argv=None):
     lint_p = sub.add_parser("lint", help="lint the config ruleset")
     lint_p.add_argument("--config", required=True)
     lint_p.set_defaults(func=cmd_lint)
+
+    m = sub.add_parser(
+        "mcp-proxy",
+        help="run an MCP server behind the guard (every tool call gated)")
+    m.add_argument("--config", required=True)
+    m.add_argument("--control-host", default="127.0.0.1")
+    m.add_argument("--control-port", type=int, default=8788,
+                   help="localhost port for the approval control endpoint")
+    m.add_argument("--no-control", action="store_true",
+                   help="disable the local approval control endpoint")
+    m.add_argument("upstream", nargs=argparse.REMAINDER,
+                   help="-- <mcp-server-cmd> [args...]")
+    m.set_defaults(func=cmd_mcp_proxy)
 
     args = ap.parse_args(argv)
     args.func(args)
