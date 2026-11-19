@@ -14,8 +14,9 @@ exposes two surfaces over the SafetyProtocol + SafeSpendAgent:
 The agent NEVER touches the config or the rules. It only sends intents:
   POST /guard     {action_type, target, method?, params?, cost?}  -> allow/block
   POST /pay       {recipient, usd, resource?}                     -> gated payment
-  POST /approve   {token, approved, approver}                     -> human sign-off
+  POST /approve   {token, approved, approver, reason?}            -> human sign-off
   POST /killswitch {reason}                                       -> kill switch
+  GET  /pending   -> actions awaiting human approval
   GET  /audit     -> immutable decision log
   GET  /health    -> status + lint summary
 
@@ -96,9 +97,14 @@ class GuardService:
             "signed": bool(r.envelope),
         }
 
-    def approve(self, token: str, approved: bool, approver: str) -> dict:
-        ok = self.protocol.decide_approval(token, approved, approver)
+    def approve(self, token: str, approved: bool, approver: str,
+                reason: str | None = None) -> dict:
+        ok = self.protocol.decide_approval(
+            token, approved, approver, reason=reason, channel="control")
         return {"approved": ok}
+
+    def pending(self) -> list[dict]:
+        return self.protocol.get_pending_approvals()
 
     def killswitch(self, reason: str) -> dict:
         self.protocol.engage_killswitch(reason)
@@ -121,6 +127,7 @@ class GuardService:
             "user_id": self.protocol.user_id,
             "state": self.protocol._state.value,
             "mode": self.protocol.mode,
+            "budget_limit": self.protocol.budget_limit,
             "lint": lint_report(self.findings),
             "monitor": m,
             "allowed_action_types": self.protocol.allowed_action_types,
@@ -156,6 +163,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self._send(200, self.service.health())
+        if self.path == "/pending":
+            return self._send(200, {"pending": self.service.pending()})
         if self.path == "/audit":
             return self._send(200, {"events": self.service.audit()})
         if self.path == "/receipts":
@@ -176,7 +185,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/approve":
             return self._send(200, self.service.approve(
                 b.get("token", ""), bool(b.get("approved", False)),
-                b.get("approver", "user")))
+                b.get("approver", "user"), reason=b.get("reason")))
         if self.path == "/killswitch":
             return self._send(200, self.service.killswitch(b.get("reason", "user")))
         return self._send(404, {"error": "not found"})
